@@ -1,0 +1,44 @@
+=== small ===
+## Tool Result
+```json:data
+{
+  "a": 1,
+  "b": "hello",
+  "nested": {
+    "x": [
+      1,
+      2,
+      3
+    ]
+  }
+}
+```
+
+[Full raw output available: mcp://magictools/raw/ID]
+---CONTENT-SEP---
+
+=== large ===
+## Tool Result
+```json:data
+{
+  "output": "a long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of c\n\n[... 343 LINES / 9600 CHARACTERS TRUNCATED BY BASTION ORCHESTRATOR ...]\n\nof content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\na long line of content here\n"
+}
+```
+
+[Full raw output available: mcp://magictools/raw/ID]
+---CONTENT-SEP---
+
+=== markdown_payload ===
+# Title
+
+some body text for the report
+
+[Full raw output available: mcp://magictools/raw/ID]
+---CONTENT-SEP---
+
+=== error ===
+STRUCT:{"x":1}
+=== nil_struct ===
+plain text
+---CONTENT-SEP---
+

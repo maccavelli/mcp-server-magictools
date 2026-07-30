@@ -1,0 +1,323 @@
+package handler
+
+import (
+	"context"
+	"mcp-server-magictools/internal/db"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+func TestValidateArguments(t *testing.T) {
+	h, store, _, tmpDir := newTestHandler(t)
+	defer os.RemoveAll(tmpDir)
+	defer store.Close()
+
+	ps := NewProxyService(h)
+
+	// Test nil record falls back to DB
+	err := ps.ValidateArguments(context.Background(), "unknown:tool", nil, map[string]any{})
+	if err != nil {
+		t.Errorf("expected no error for unknown tool, got %v", err)
+	}
+
+	// Test schema with no hash
+	rec := &db.ToolRecord{SchemaHash: ""}
+	err = ps.ValidateArguments(context.Background(), "t:t", rec, nil)
+	if err != nil {
+		t.Errorf("expected no error for empty schema, got %v", err)
+	}
+}
+
+func TestInspectResponse(t *testing.T) {
+	ps := NewProxyService(nil)
+
+	// nil/err checks
+	if ps.InspectResponse(context.Background(), nil, "s", "t") != nil {
+		t.Error("expected nil on nil response")
+	}
+	if ps.InspectResponse(context.Background(), &mcp.CallToolResult{IsError: true}, "s", "t") != nil {
+		t.Error("expected nil on error response")
+	}
+
+	// Empty structured content
+	res := &mcp.CallToolResult{
+		StructuredContent: map[string]any{
+			"results": []any{},
+		},
+	}
+	diag := ps.InspectResponse(context.Background(), res, "s", "t")
+	if diag == nil || !diag.Detected {
+		t.Errorf("expected detected diag, got %v", diag)
+	}
+
+	// zero count in structured content
+	res2 := &mcp.CallToolResult{
+		StructuredContent: map[string]any{
+			"total_count": 0,
+		},
+	}
+	diag2 := ps.InspectResponse(context.Background(), res2, "s", "t")
+	if diag2 == nil || !diag2.Detected {
+		t.Errorf("expected detected diag, got %v", diag2)
+	}
+}
+
+func TestRepairJSONHeuristic(t *testing.T) {
+	ps := NewProxyService(nil)
+
+	// Test markdown extraction
+	input := "```json\n{\"test\": 123}\n```"
+	repaired := ps.repairJSONHeuristic(input)
+	if repaired != "{\"test\": 123}" {
+		t.Errorf("expected extracted JSON, got %q", repaired)
+	}
+
+	input2 := "```\n[1, 2]\n```"
+	repaired2 := ps.repairJSONHeuristic(input2)
+	if repaired2 != "[1, 2]" {
+		t.Errorf("expected extracted array, got %q", repaired2)
+	}
+
+	// Test trailing commas repair
+	input3 := "{\"key\": \"val\",}"
+	repaired3 := ps.repairJSONHeuristic(input3)
+	if repaired3 != "{\"key\": \"val\"}" {
+		t.Errorf("expected trailing comma removed, got %q", repaired3)
+	}
+}
+
+func TestResolveURN(t *testing.T) {
+	h, store, _, tmpDir := newTestHandler(t)
+	defer os.RemoveAll(tmpDir)
+	defer store.Close()
+
+	ps := NewProxyService(h)
+
+	_ = store.SaveTool(&db.ToolRecord{URN: "s1:toolA", Name: "toolA", Server: "s1"})
+	
+	_, _, urn, record, err := ps.ResolveURN(context.Background(), "s1:toolA")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if urn != "s1:toolA" || record == nil {
+		t.Errorf("expected resolved URN")
+	}
+
+	// Fallback when wrong prefix
+	_, _, urn2, _, _ := ps.ResolveURN(context.Background(), "wrong:toolA")
+	// If fallback is successful it's s1:toolA
+	if urn2 != "s1:toolA" {
+		t.Errorf("expected s1:toolA via fallback, got %s", urn2)
+	}
+
+	// Invalid
+	_, _, _, _, err = ps.ResolveURN(context.Background(), "nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent tool")
+	}
+}
+
+func TestExecuteProxy(t *testing.T) {
+	h, store, _, tmpDir := newTestHandler(t)
+	defer os.RemoveAll(tmpDir)
+	defer store.Close()
+
+	ps := NewProxyService(h)
+
+	// Test bad Server
+	_, err := ps.ExecuteProxy(context.Background(), "bad_server", "tool", nil, 1*time.Second)
+	if err == nil {
+		t.Error("expected error for bad server")
+	}
+}
+
+func TestUnmarshalCallProxyArgs(t *testing.T) {
+	ps := NewProxyService(nil)
+
+	// Valid payload
+	valid := []byte(`{"urn": "s1:toolA", "arguments": {"a": 1}}`)
+	p, err := ps.unmarshalCallProxyArgs(valid)
+	if err != nil || p.URN != "s1:toolA" {
+		t.Errorf("failed valid unmarshal: %v", err)
+	}
+
+	// Double encoded
+	doubleEnc := []byte(`{"urn": "s1:toolA", "arguments": "{\"a\": 1}"}`)
+	p, err = ps.unmarshalCallProxyArgs(doubleEnc)
+	if err != nil || p.URN != "s1:toolA" {
+		t.Errorf("failed double encoded repair: %v", err)
+	}
+
+	// Flat structure
+	flat := []byte(`{"urn": "s1:toolA", "a": 1}`)
+	p, err = ps.unmarshalCallProxyArgs(flat)
+	if err != nil || p.URN != "s1:toolA" {
+		t.Errorf("failed flat structure repair: %v", err)
+	}
+
+	// Nested structure
+	nested := []byte(`{"urn": "s1:toolA", "arguments": {"arguments": {"a": 1}}}`)
+	p, err = ps.unmarshalCallProxyArgs(nested)
+	if err != nil || p.URN != "s1:toolA" {
+		t.Errorf("failed nested structure repair: %v", err)
+	}
+
+	// Invalid
+	_, err = ps.unmarshalCallProxyArgs([]byte(`{invalid json}`))
+	if err == nil {
+		t.Error("expected error for invalid json")
+	}
+}
+
+func TestRepairSimpleArgs(t *testing.T) {
+	ps := NewProxyService(nil)
+
+	var target struct{ URN string }
+	err := ps.repairSimpleArgs([]byte(`{"URN": "s1",}`), &target)
+	if err != nil || target.URN != "s1" {
+		t.Errorf("failed trailing comma repair: %v", err)
+	}
+}
+
+func TestCoerceAndStrip(t *testing.T) {
+	ps := NewProxyService(nil)
+
+	record := &db.ToolRecord{
+		InputSchema: map[string]any{
+			"properties": map[string]any{
+				"valid": map[string]any{"type": "string"},
+			},
+		},
+	}
+
+	args := map[string]any{
+		"valid": "yes",
+		"extra": "no",
+	}
+
+	ps.CoerceAndStrip(record, args)
+
+	if _, ok := args["extra"]; ok {
+		t.Error("expected extra field to be stripped")
+	}
+}
+
+func TestRepairCallProxyArgsXML(t *testing.T) {
+	ps := NewProxyService(nil)
+	
+	// XML pollution with newline
+	xmlArg := []byte(`{"urn": "s1:toolA", "arguments": "{\"a\": 1}\n<parameter name=\"foo\">..."}`)
+	p, err := ps.unmarshalCallProxyArgs(xmlArg)
+	if err != nil || p.URN != "s1:toolA" {
+		t.Errorf("failed XML stripped repair: %v", err)
+	}
+
+	// XML pollution without newline
+	xmlArg2 := []byte(`{"urn": "s1:toolA", "arguments": "{\"a\": 1}<parameter name=\"foo\">..."}`)
+	p, err = ps.unmarshalCallProxyArgs(xmlArg2)
+	if err != nil || p.URN != "s1:toolA" {
+		t.Errorf("failed XML stripped repair without newline: %v", err)
+	}
+}
+
+
+func TestMinifyResponseExtra(t *testing.T) {
+	h, store, _, tmpDir := newTestHandler(t)
+	defer os.RemoveAll(tmpDir)
+	defer store.Close()
+	
+	ps := NewProxyService(h)
+	
+	// Error response
+	resErr := &mcp.CallToolResult{IsError: true}
+	if ps.MinifyResponse(context.Background(), resErr, "s", "t", 0, 10) != resErr {
+		t.Error("expected unchanged on error")
+	}
+	
+	// Structured payload
+	res := &mcp.CallToolResult{
+		StructuredContent: map[string]any{
+			"key1": "val1",
+			"key2": nil,
+		},
+	}
+	
+	minified := ps.MinifyResponse(context.Background(), res, "s", "t", 0, 100)
+	if minified == nil {
+		t.Error("expected minified result")
+	}
+}
+
+func TestRepairCallProxyArgsMore(t *testing.T) {
+	ps := NewProxyService(nil)
+	
+	// Phase 1: double encoded with \n<parameter
+	xml1 := []byte(`{"urn": "s1:toolA", "arguments": "{\"a\": 1}\n<parameter name=\"foo\">..."}`)
+	p, err := ps.unmarshalCallProxyArgs(xml1)
+	if err != nil || p.URN != "s1:toolA" { t.Error("failed xml1") }
+	
+	// Phase 2: Missing arguments wrapper
+	flat := []byte(`{"urn": "s1:toolA", "a": 1, "b": 2}`)
+	p2, err := ps.unmarshalCallProxyArgs(flat)
+	if err != nil || p2.URN != "s1:toolA" { t.Error("failed flat") }
+	
+	// Nested array in flat
+	flat2 := []byte(`{"urn": "s1:toolA", "a": [1,2], "b": {"c": 3}}`)
+	p3, err := ps.unmarshalCallProxyArgs(flat2)
+	if err != nil || p3.URN != "s1:toolA" { t.Error("failed flat2") }
+	
+	// Phase 3: Nested argument envelope
+	nest := []byte(`{"urn": "s1:toolA", "arguments": {"arguments": {"a": 1}}}`)
+	p4, err := ps.unmarshalCallProxyArgs(nest)
+	if err != nil || p4.URN != "s1:toolA" { t.Error("failed nest") }
+	
+	// Deep nest
+	nest2 := []byte(`{"urn": "s1:toolA", "arguments": {"arguments": {"arguments": {"a": 1}}}}`)
+	p5, err := ps.unmarshalCallProxyArgs(nest2)
+	if err != nil || p5.URN != "s1:toolA" { t.Error("failed nest2") }
+	
+	// Fallback to text heuristic
+	bad := []byte(`{"urn": "s1:toolA", "arguments": "broken}`)
+	_, _ = ps.unmarshalCallProxyArgs(bad)
+}
+
+func TestValidateArgumentsMore(t *testing.T) {
+	h, store, _, tmpDir := newTestHandler(t)
+	defer os.RemoveAll(tmpDir)
+	defer store.Close()
+
+	ps := NewProxyService(h)
+
+	record := &db.ToolRecord{
+		URN: "test",
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"reqString": map[string]any{"type": "string"},
+			},
+			"required": []any{"reqString"},
+		},
+		SchemaHash: "hash123",
+	}
+
+	// Missing required
+	err := ps.ValidateArguments(context.Background(), "test", record, map[string]any{})
+	if err == nil {
+		t.Error("expected error for missing required arg")
+	}
+
+	// Invalid type
+	err = ps.ValidateArguments(context.Background(), "test", record, map[string]any{"reqString": 123})
+	if err == nil {
+		t.Error("expected error for invalid type")
+	}
+
+	// Valid
+	err = ps.ValidateArguments(context.Background(), "test", record, map[string]any{"reqString": "hello"})
+	if err != nil {
+		t.Error("expected no error for valid args")
+	}
+}
