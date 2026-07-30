@@ -247,7 +247,7 @@ func TestGitCheckpoints(t *testing.T) {
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Ensure git doesn't find a parent git repo (like /home/adm_saxsmith/.git)
+	// Ensure git doesn't find a parent git repo (like $HOME/.git)
 	os.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(tmpDir))
 	defer os.Unsetenv("GIT_CEILING_DIRECTORIES")
 

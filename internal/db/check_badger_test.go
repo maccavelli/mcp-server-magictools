@@ -2,13 +2,17 @@ package db
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/dgraph-io/badger/v4"
 )
 
 func TestDebugLiveBadger(t *testing.T) {
-	path := "/home/adm_saxsmith/.local/share/mcp-server-magictools/data"
+	path := os.Getenv("MAGICTOOLS_DEBUG_DB")
+	if path == "" {
+		t.Skip("debug harness: set MAGICTOOLS_DEBUG_DB to a live data directory to run")
+	}
 	store, err := NewStore(path)
 	if err != nil {
 		t.Fatalf("Error opening DB: %v\n", err)
