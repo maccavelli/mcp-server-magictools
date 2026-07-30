@@ -40,8 +40,8 @@ func killPIDGroup(pid int) error {
 			}
 			time.Sleep(pollInterval)
 		}
-		_ = syscall.Kill(-pid, syscall.SIGKILL)
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+		_ = syscall.Kill(-pid, syscall.SIGKILL) //nolint:errcheck // best-effort group signal
+		_ = syscall.Kill(pid, syscall.SIGKILL)  //nolint:errcheck // fallback for individual process
 	}()
 
 	return nil

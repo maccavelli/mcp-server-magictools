@@ -50,6 +50,10 @@ linters:
     gosec:
       excludes:
         - G104
+        # G703 taint analysis flags every file op on the user-configured data
+        # directory; a local server managing its own datadir is not a path
+        # traversal surface.
+        - G703
     revive:
       rules:
         - name: atomic
