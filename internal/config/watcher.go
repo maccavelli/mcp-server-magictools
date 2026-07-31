@@ -72,11 +72,17 @@ func (w *Watcher) Start() {
 	slog.Info("watcher started", "component", "config", "path", w.v.ConfigFileUsed())
 
 	// Watch servers.yaml via fsnotify (sub-server registry)
-	serversPath := filepath.Join(DefaultConfigDir(), ServersConfigFile)
+	serversPath := w.liveConfig.Paths.Servers
+	if serversPath == "" {
+		serversPath = filepath.Join(DefaultConfigDir(), ServersConfigFile)
+	}
 	go w.watchServersFile(serversPath)
 
 	// Watch tool_overrides.yaml via fsnotify
-	overridesPath := filepath.Join(DefaultConfigDir(), "tool_overrides.yaml")
+	overridesPath := w.liveConfig.Paths.Overrides
+	if overridesPath == "" {
+		overridesPath = filepath.Join(DefaultConfigDir(), "tool_overrides.yaml")
+	}
 	go w.watchOverridesFile(overridesPath)
 
 	// Hardening: Fallback polling for Bastion hosts where fsnotify might fail
@@ -245,7 +251,10 @@ func (w *Watcher) handleChange() {
 
 // handleServersChange processes servers.yaml changes (sub-server registry).
 func (w *Watcher) handleServersChange() {
-	path := filepath.Join(DefaultConfigDir(), ServersConfigFile)
+	path := w.liveConfig.Paths.Servers
+	if path == "" {
+		path = filepath.Join(DefaultConfigDir(), ServersConfigFile)
+	}
 	raw, err := os.ReadFile(filepath.Clean(path)) //nolint:gosec // path constructed from controlled config directory
 	if err != nil {
 		slog.Error("failed to read servers.yaml", "component", "config", "error", err)
@@ -260,7 +269,7 @@ func (w *Watcher) handleServersChange() {
 	w.srvHash = newHash
 	w.mu.Unlock()
 
-	servers, err := LoadManagedServers()
+	servers, err := LoadManagedServersAt(path)
 	if err != nil {
 		slog.Error("failed to reload servers.yaml", "component", "config", "error", err)
 		return
@@ -355,7 +364,10 @@ func (w *Watcher) watchOverridesFile(path string) {
 
 // handleOverridesChange processes tool_overrides.yaml changes.
 func (w *Watcher) handleOverridesChange() {
-	path := filepath.Join(DefaultConfigDir(), "tool_overrides.yaml")
+	path := w.liveConfig.Paths.Overrides
+	if path == "" {
+		path = filepath.Join(DefaultConfigDir(), "tool_overrides.yaml")
+	}
 	raw, err := os.ReadFile(filepath.Clean(path)) //nolint:gosec // path constructed from controlled config directory
 	if err != nil {
 		if os.IsNotExist(err) {

@@ -89,6 +89,7 @@ const (
 	keyRequired   = "required"
 	keyError      = "error"
 	keyMeta       = "_meta"
+	keyLogLevel   = "logLevel"
 )
 
 // Recall and diagnostic sources.

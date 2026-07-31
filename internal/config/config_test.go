@@ -314,6 +314,118 @@ func TestSaveConfiguration(t *testing.T) {
 	}
 }
 
+// TestCFG02_SaveConfigurationGatedOnFastProvider documents CFG-02:
+// SaveConfiguration gates the entire intelligence section on c.Intelligence.Provider != "".
+// Setting ThinkingProvider on a config without a Fast Tier provider results in intelligence not being written.
+func TestCFG02_SaveConfigurationGatedOnFastProvider(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.yaml")
+	os.WriteFile(path, []byte(""), 0644)
+
+	cfg := &Config{
+		ConfigPath: path,
+		Intelligence: IntelligenceEngine{
+			Provider:         "", // Fast provider empty
+			ThinkingProvider: "claude",
+			ThinkingModel:    "claude-3-5-sonnet",
+			ThinkingAPIKey:   "sk-test-key",
+		},
+	}
+
+	if err := cfg.SaveConfiguration(); err != nil {
+		t.Fatalf("SaveConfiguration failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	strData := string(data)
+	if strings.Contains(strData, "thinking_provider: claude") {
+		t.Fatalf("[CFG-02] unexpected persistence of thinking_provider when Fast provider is empty before WP2 fix:\n%s", strData)
+	}
+}
+
+// TestCFG03_SaveConfigurationLeavesStaleKeysOnClear documents CFG-03:
+// Clearing thinking fields sets in-memory values to "" and calls SaveConfiguration.
+// SaveConfiguration skips empty optional fields, leaving existing YAML keys in place.
+func TestCFG03_SaveConfigurationLeavesStaleKeysOnClear(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.yaml")
+	initialYAML := `intelligence:
+  provider: gemini
+  model: gemini-2.5-flash
+  thinking_provider: claude
+  thinking_api_key: sk-old-secret
+`
+	os.WriteFile(path, []byte(initialYAML), 0644)
+
+	cfg := &Config{
+		ConfigPath: path,
+		Intelligence: IntelligenceEngine{
+			Provider:         "gemini",
+			Model:            "gemini-2.5-flash",
+			ThinkingProvider: "", // Cleared
+			ThinkingAPIKey:   "", // Cleared
+		},
+	}
+
+	if err := cfg.SaveConfiguration(); err != nil {
+		t.Fatalf("SaveConfiguration failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	strData := string(data)
+	if !strings.Contains(strData, "thinking_api_key: sk-old-secret") {
+		t.Fatalf("[CFG-03] expected stale thinking_api_key to remain in YAML after clear before WP2 patch fix:\n%s", strData)
+	}
+}
+
+// TestCFG07_UnrelatedSaveMutatesRRFBiases documents CFG-07:
+// Runtime normalization (e.g. normalizeRRFBiases) alters default zero role weights,
+// causing an unrelated SaveConfiguration to persist mutated search weights.
+func TestCFG07_UnrelatedSaveMutatesRRFBiases(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "config.yaml")
+	initialYAML := `logLevel: INFO
+search:
+  rrf_biases:
+    semantic: 0.7
+    keyword: 0.3
+    role: 0.0
+`
+	os.WriteFile(path, []byte(initialYAML), 0644)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	cfg.ConfigPath = path
+	cfg.Intelligence.Provider = "gemini"
+	cfg.Intelligence.Model = "gemini-2.5-flash"
+
+	if err := cfg.SaveConfiguration(); err != nil {
+		t.Fatalf("SaveConfiguration failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	strData := string(data)
+	// Role bias 0.0 gets normalized to non-zero 0.230769..., mutating search settings on unrelated save
+	if !strings.Contains(strData, "synthesisBiasRole: 0.23") && !strings.Contains(strData, "synthesisBiasRole: 0.3") {
+		t.Fatalf("[CFG-07] expected RRF role bias synthesisBiasRole to be mutated into saved YAML by normalizeRRFBiases before WP2 fix:\n%s", strData)
+	}
+}
+
 func TestMigrateDataDir(t *testing.T) {
 	tmpDir := t.TempDir()
 	oldDir := filepath.Join(tmpDir, "old")

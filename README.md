@@ -214,7 +214,7 @@ The primary LLM used for tool description hydration, search intelligence, and ge
 
 **Steps:**
 
-1. **Select provider** — Choose from Gemini (recommended), Claude (Anthropic), OpenAI, or Ollama (local).
+1. **Select provider** — Choose from Gemini (recommended), Claude (Anthropic), or OpenAI.
 2. **API key resolution** — The wizard checks three sources in priority order:
    - Environment variable (e.g., `GEMINI_API_KEY`, `OPENAI_API_KEY`, `CLAUDE_API_KEY`)
    - Existing key in `config.yaml` from a previous run
@@ -735,7 +735,7 @@ Governs limits, logging, search weights, LLM providers, and shared backplane set
 | `pinnedServers` | `list` | `[]` | Sub-servers immune to idle sleep eviction. |
 | `trustServers` | `list` | `[]` | Sub-servers authorized for inline execution in `align_tools`. |
 | **Intelligence (LLM)**| | | |
-| `intelligence.provider`| `string`| *(none)* | Fast Tier LLM provider (`gemini`, `openai`, `claude`, `ollama`, `voyage`). |
+| `intelligence.provider`| `string`| *(none)* | Fast Tier LLM provider (`gemini`, `openai`, `claude`). |
 | `intelligence.model`| `string`| *(none)* | Fast Tier model name (e.g. `gemini-2.5-flash`). |
 | `intelligence.fallback_models`| `list`| `[]` | Ordered models to fall back to if the primary model fails. |
 | `intelligence.retry_count`| `int` | `2` | Retry attempts for transient LLM API calls. |

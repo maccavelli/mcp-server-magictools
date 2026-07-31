@@ -64,10 +64,10 @@ func TestConfigUIFunctions(t *testing.T) {
 	}()
 
 	showCurrentConfig(cfg)
-	configureBackplane(cfg)
-	configureFastTier(cfg, reader)
-	configureThinkingTier(cfg, reader)
-	configureEmbeddingEngine(cfg, reader)
+	configureBackplane(cfg, &config.BackplanePatch{})
+	configureFastTier(cfg, &config.FastTierPatch{}, reader)
+	configureThinkingTier(cfg, &config.ThinkingTierPatch{}, reader)
+	configureEmbeddingEngine(cfg, &config.EmbeddingPatch{}, reader)
 }
 
 func TestEnsureInitialized(t *testing.T) {

@@ -366,6 +366,7 @@ type Config struct {
 	Version               string
 	DBPath                string
 	ConfigPath            string
+	Paths                 Paths
 	ManagedServers        []ServerConfig
 	ideConfig             *IDEConfig // raw parsed config for diffing
 	MaxResponseTokens     int
@@ -531,18 +532,11 @@ func New(version, flagPath string) (*Config, error) {
 		}
 	}
 
-	configPath := flagPath
-	if configPath == "" {
-		configPath = os.Getenv(EnvConfigPath)
+	resolvedPaths, err := ResolvePaths(flagPath)
+	if err != nil {
+		return nil, err
 	}
-	if configPath == "" {
-		configPath = filepath.Join(DefaultConfigDir(), ToolConfigFile)
-	}
-
-	// 🛡️ ABSOLUTE RESOLUTION: Ensure we are using an absolute path before loading
-	if abs, err := filepath.Abs(configPath); err == nil {
-		configPath = abs
-	}
+	configPath := resolvedPaths.Config
 
 	// 🛡️ VIPER INITIALIZATION: Set up Viper to manage the primary config file
 	v := viper.New()
@@ -605,6 +599,7 @@ func New(version, flagPath string) (*Config, error) {
 	}
 	cfg.v = v
 	cfg.ConfigPath = configPath
+	cfg.Paths = resolvedPaths
 	cfg.Name = Name
 	cfg.Version = version
 	cfg.DBPath = dbPath
@@ -1094,11 +1089,17 @@ func LoadFromViper(v *viper.Viper) (*Config, error) {
 		}
 	}
 
-	managed, err := LoadManagedServers()
+	serversPath := filepath.Join(DefaultConfigDir(), ServersConfigFile)
+	if path := v.ConfigFileUsed(); path != "" {
+		if p, err := ResolvePaths(path); err == nil {
+			serversPath = p.Servers
+		}
+	}
+
+	managed, err := LoadManagedServersAt(serversPath)
 	if err != nil {
 		slog.Info("config: servers.yaml not found, generating defaults", "error", err)
 
-		serversPath := filepath.Join(DefaultConfigDir(), ServersConfigFile)
 		if err := os.MkdirAll(filepath.Dir(serversPath), 0700); err != nil {
 			slog.Warn("config: failed to create config directory", "path", serversPath, "error", err)
 		}
@@ -1109,7 +1110,7 @@ func LoadFromViper(v *viper.Viper) (*Config, error) {
 			slog.Info("config: generated default servers.yaml")
 		}
 
-		managed, _ = LoadManagedServers()
+		managed, _ = LoadManagedServersAt(serversPath)
 
 		if data, err := os.ReadFile(ideConfigPath); err == nil {
 			var rawIDE IDEConfig
@@ -1443,9 +1444,13 @@ type serverEntry struct {
 	Disabled      bool              `yaml:"disabled"`
 }
 
-// LoadManagedServers reads the native server registry from servers.yaml.
+// LoadManagedServers reads the native server registry from default servers.yaml.
 func LoadManagedServers() ([]ServerConfig, error) {
-	path := filepath.Join(DefaultConfigDir(), ServersConfigFile)
+	return LoadManagedServersAt(filepath.Join(DefaultConfigDir(), ServersConfigFile))
+}
+
+// LoadManagedServersAt reads the native server registry from the specified servers.yaml path.
+func LoadManagedServersAt(path string) ([]ServerConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("servers.yaml not found: %w", err)
@@ -1476,12 +1481,14 @@ func LoadManagedServers() ([]ServerConfig, error) {
 	return servers, nil
 }
 
-// SaveManagedServers writes the native server registry to servers.yaml,
-// preserving all existing YAML comments and structure. It decodes the file
-// into a yaml.Node AST and updates server entries in-place. New servers are
-// appended without affecting existing entries or their comments.
+// SaveManagedServers writes the native server registry to default servers.yaml.
 func SaveManagedServers(servers []ServerConfig) error {
-	path := filepath.Join(DefaultConfigDir(), ServersConfigFile)
+	return SaveManagedServersAt(filepath.Join(DefaultConfigDir(), ServersConfigFile), servers)
+}
+
+// SaveManagedServersAt writes the native server registry to the specified path,
+// preserving all existing YAML comments and structure.
+func SaveManagedServersAt(path string, servers []ServerConfig) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}

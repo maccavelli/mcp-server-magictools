@@ -56,7 +56,7 @@ func Execute() {
 }
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&CfgPath, "config", "", "Path to IDE mcp_config.json")
+	rootCmd.PersistentFlags().StringVar(&CfgPath, "config", "", "Path to MagicTools primary config.yaml (legacy JSON paths accepted for serve only)")
 	rootCmd.PersistentFlags().StringVar(&DBPath, "db", "", "Path to BadgerDB")
 	rootCmd.PersistentFlags().StringVar(&LogPath, "log", "", "Path to log file")
 

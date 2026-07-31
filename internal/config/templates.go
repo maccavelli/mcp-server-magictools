@@ -215,7 +215,7 @@ const defaultConfigTemplate = `configuration:
     # The primary LLM used for parsing tasks, composing DAG pipelines,
     # hydrating tool intelligence, and servicing sub-server requests via
     # the shared LLM backplane.
-    # Supported providers: ollama, gemini, openai, claude, voyage
+    # Supported providers: gemini, openai, claude
     provider: ""
     model: ""
     api_key: ""
@@ -235,7 +235,7 @@ const defaultConfigTemplate = `configuration:
     # from the fast tier. When configured, requests to /llm/generate-thinking
     # run this model with extended thinking enabled. If NOT configured, the
     # thinking endpoint returns HTTP 404 and callers degrade to the fast tier.
-    # Supported providers: ollama, gemini, openai, claude, voyage
+    # Supported providers: gemini, openai, claude
     thinking_provider: ""
     thinking_model: ""
     thinking_api_key: ""

@@ -271,16 +271,54 @@ func (h *OrchestratorHandler) UpdateConfig(ctx context.Context, req *mcp.CallToo
 		return nil, err
 	}
 
+	// Build typed RuntimeConfigPatch for ConfigStore transaction
+	var runtimePatch config.RuntimeConfigPatch
+	switch input.Key {
+	case keyLogLevel:
+		runtimePatch.LogLevel = config.Set(h.Config.LogLevel)
+	case "mcpLogLevel":
+		runtimePatch.MCPLogLevel = config.Set(h.Config.MCPLogLevel)
+	case "logFormat":
+		runtimePatch.LogFormat = config.Set(h.Config.LogFormat)
+	case "squeezeLevel":
+		if h.Config.SqueezeLevelState != nil {
+			runtimePatch.SqueezeLevel = config.Set(*h.Config.SqueezeLevelState)
+		} else {
+			runtimePatch.SqueezeLevel = config.Remove[int]()
+		}
+	case "scoreThreshold":
+		runtimePatch.ScoreThreshold = config.Set(h.Config.ScoreThreshold)
+	case "confidenceGap":
+		runtimePatch.ConfidenceGap = config.Set(h.Config.ConfidenceGap)
+	case "validateProxyCalls":
+		runtimePatch.ValidateProxyCalls = config.Set(h.Config.ValidateProxyCalls)
+	case "pinnedServers":
+		runtimePatch.PinnedServers = config.Set(h.Config.PinnedServers)
+	case "trustServers":
+		runtimePatch.TrustServers = config.Set(h.Config.TrustServers)
+	case "squeezeBypass":
+		runtimePatch.SqueezeBypass = config.Set(h.Config.SqueezeBypass)
+	case "ringBufferTargets":
+		runtimePatch.RingBufferTargets = config.Set(h.Config.RingBufferTargets)
+	case "tokenSpendThresh":
+		runtimePatch.TokenSpendThresh = config.Set(h.Config.TokenSpendThresh)
+	case "lruLimit":
+		runtimePatch.LRULimit = config.Set(h.Config.LRULimit)
+	}
+
+	patch := config.ConfigurationPatch{Runtime: runtimePatch}
+	store := config.NewStore(h.Config.Paths)
+	if _, applyErr := store.Apply(ctx, patch); applyErr != nil {
+		// Rollback in-memory mutation on store failure
+		_, _ = h.Config.UpdateConfigValue(input.Key, oldValue) //nolint:errcheck // best-effort rollback
+		return nil, fmt.Errorf("failed to persist configuration: %w", applyErr)
+	}
+
 	// 🛡️ LIVE LOG LEVEL: Apply immediately to all slog handlers
-	if input.Key == "logLevel" && h.LogLevel != nil {
+	if input.Key == keyLogLevel && h.LogLevel != nil {
 		newLevel := logging.ParseLogLevel(strings.ToUpper(input.Value))
 		h.LogLevel.Set(newLevel)
 		slog.Info("update_config: log level changed at runtime", "old", oldValue, "new", strings.ToUpper(input.Value))
-	}
-
-	// Persist to disk via SaveConfiguration()
-	if err := h.Config.SaveConfiguration(); err != nil {
-		return nil, fmt.Errorf("failed to persist configuration: %w", err)
 	}
 
 	msg := fmt.Sprintf("Configuration updated: %s changed from '%s' to '%s'. Change persisted to config.yaml and applied at runtime.", input.Key, oldValue, input.Value)
