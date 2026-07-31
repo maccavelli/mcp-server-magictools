@@ -36,8 +36,9 @@ func TestLoadAndExtract(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(tmpDir)
-	os.Setenv("XDG_CONFIG_HOME", tmpDir)
-	defer os.Unsetenv("XDG_CONFIG_HOME")
+	// XDG_CONFIG_HOME only redirects os.UserConfigDir on Linux; use the
+	// loader's own override so the redirect holds on macOS too.
+	t.Setenv(EnvConfigDir, filepath.Join(tmpDir, "mcp-server-magictools"))
 
 	configPath := filepath.Join(tmpDir, "mcp_config.json")
 	data, _ := json.Marshal(ideCfg)
@@ -90,8 +91,9 @@ func TestLoadAndExtract(t *testing.T) {
 func TestLoadFromServersYAML(t *testing.T) {
 	// Save and restore DefaultConfigDir by using env override
 	tmpDir := t.TempDir()
-	os.Setenv("XDG_CONFIG_HOME", tmpDir)
-	defer os.Unsetenv("XDG_CONFIG_HOME")
+	// XDG_CONFIG_HOME only redirects os.UserConfigDir on Linux; use the
+	// loader's own override so the redirect holds on macOS too.
+	t.Setenv(EnvConfigDir, filepath.Join(tmpDir, "mcp-server-magictools"))
 
 	servers := []ServerConfig{
 		{
@@ -249,8 +251,9 @@ func TestUpdateConfigValue(t *testing.T) {
 
 func TestNew(t *testing.T) {
 	tmpDir := t.TempDir()
-	os.Setenv("XDG_CONFIG_HOME", tmpDir)
-	defer os.Unsetenv("XDG_CONFIG_HOME")
+	// XDG_CONFIG_HOME only redirects os.UserConfigDir on Linux; use the
+	// loader's own override so the redirect holds on macOS too.
+	t.Setenv(EnvConfigDir, filepath.Join(tmpDir, "mcp-server-magictools"))
 
 	cfgFile := filepath.Join(tmpDir, "mcp-server-magictools", "config.yaml")
 

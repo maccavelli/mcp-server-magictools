@@ -454,7 +454,7 @@ const launchdPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.saxsmith.mcp-server-magictools</string>
+    <string>com.magictools.mcp-server-magictools</string>
     <key>ProgramArguments</key>
     <array>
         <string>{{.BinPath}}</string>
@@ -611,7 +611,7 @@ func installLaunchd(binPath string) error {
 		chownForUser(agentDir, uidStr)
 	}
 
-	plistPath := filepath.Join(agentDir, "com.saxsmith.mcp-server-magictools.plist")
+	plistPath := filepath.Join(agentDir, "com.magictools.mcp-server-magictools.plist")
 
 	// BUG-5/HARD-2: Allow --force to overwrite existing service files for upgrades
 	if _, err := os.Stat(plistPath); err == nil && !forceServiceInstall {
@@ -682,7 +682,7 @@ func installLaunchd(binPath string) error {
 	}
 
 	guiTarget := fmt.Sprintf("gui/%s", uidStr)
-	domainTarget := fmt.Sprintf("gui/%s/com.saxsmith.mcp-server-magictools", uidStr)
+	domainTarget := fmt.Sprintf("gui/%s/com.magictools.mcp-server-magictools", uidStr)
 
 	// Ensure old service is booted out first
 	if isRoot && username != "" {
@@ -720,7 +720,7 @@ func uninstallLaunchd() error {
 		return err
 	}
 
-	plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.saxsmith.mcp-server-magictools.plist")
+	plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.magictools.mcp-server-magictools.plist")
 
 	// HARD-23: Read PID before stopping
 	var stalePID int
@@ -733,7 +733,7 @@ func uninstallLaunchd() error {
 	}
 
 	guiTarget := fmt.Sprintf("gui/%s", uidStr)
-	domainTarget := fmt.Sprintf("gui/%s/com.saxsmith.mcp-server-magictools", uidStr)
+	domainTarget := fmt.Sprintf("gui/%s/com.magictools.mcp-server-magictools", uidStr)
 
 	currentUser, uErr := user.Current()
 	isRoot := uErr == nil && currentUser.Uid == "0"
@@ -945,7 +945,7 @@ var serviceStartCmd = &cobra.Command{
 				return err
 			}
 			guiTarget := fmt.Sprintf("gui/%s", uidStr)
-			domainTarget := fmt.Sprintf("gui/%s/com.saxsmith.mcp-server-magictools", uidStr)
+			domainTarget := fmt.Sprintf("gui/%s/com.magictools.mcp-server-magictools", uidStr)
 			// REV-4: Check if loaded first; use kickstart if loaded, bootstrap if not
 			if _, err := timedExec("launchctl", "print", domainTarget); err == nil {
 				out, kickErr := timedExec("launchctl", "kickstart", "-k", domainTarget)
@@ -957,7 +957,7 @@ var serviceStartCmd = &cobra.Command{
 				if launchErr != nil {
 					return fmt.Errorf("resolve launchd target: %w", launchErr)
 				}
-				plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.saxsmith.mcp-server-magictools.plist")
+				plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.magictools.mcp-server-magictools.plist")
 				out, bsErr := timedExec("launchctl", "bootstrap", guiTarget, plistPath)
 				if bsErr != nil {
 					return fmt.Errorf("launchctl bootstrap failed: %s: %w", string(out), bsErr)
@@ -995,7 +995,7 @@ var serviceStopCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			domainTarget := fmt.Sprintf("gui/%s/com.saxsmith.mcp-server-magictools", uidStr)
+			domainTarget := fmt.Sprintf("gui/%s/com.magictools.mcp-server-magictools", uidStr)
 			out, killErr := timedExec("launchctl", "kill", "SIGTERM", domainTarget)
 			if killErr != nil {
 				return fmt.Errorf("launchctl kill failed: %s: %w", string(out), killErr)
@@ -1139,7 +1139,7 @@ var serviceDoctorCmd = &cobra.Command{
 			}
 		case goOSDarwin:
 			home := homeDirOrDot()
-			plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.saxsmith.mcp-server-magictools.plist")
+			plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.magictools.mcp-server-magictools.plist")
 			if _, err := os.Stat(plistPath); err != nil {
 				fmt.Printf("  ✗ LaunchAgent plist not found: %s\n", plistPath)
 				issues++

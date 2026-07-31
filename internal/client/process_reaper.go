@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/shirou/gopsutil/v4/process"
+
+	"github.com/maccavelli/mcp-server-magictools/internal/util"
 )
 
 func isLegitimateDescendant(pid int32, activePIDs map[int32]bool, myPid int32, myPpid int32) bool {
@@ -69,7 +71,7 @@ func (m *WarmRegistry) PruneOrphans() {
 			continue
 		}
 
-		env, err := p.Environ()
+		env, err := util.GetProcessEnviron(int(pid))
 		if err != nil {
 			continue
 		}
@@ -162,7 +164,7 @@ func (m *WarmRegistry) lookupSystemProcesses(_ context.Context, name, command st
 			continue
 		}
 
-		env, err := p.Environ()
+		env, err := util.GetProcessEnviron(int(pid))
 		if err != nil {
 			continue
 		}

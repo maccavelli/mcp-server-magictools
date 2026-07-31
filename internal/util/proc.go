@@ -55,12 +55,3 @@ func GetProcessCPU(pid int) (float64, error) {
 	// we will measure over time in the monitor loop.
 	return p.CPUPercent()
 }
-
-// GetProcessEnviron returns the environment variables for the process as a slice of "KEY=VALUE".
-func GetProcessEnviron(pid int) ([]string, error) {
-	p, err := process.NewProcess(safeInt32FromPID(pid))
-	if err != nil {
-		return nil, err
-	}
-	return p.Environ()
-}

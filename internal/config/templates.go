@@ -1,7 +1,10 @@
 // Package config provides functionality for the config subsystem.
 package config
 
-import "runtime"
+import (
+	"runtime"
+	"strings"
+)
 
 // DefaultConfigTemplate returns the embedded default config.yaml template content.
 // Used by both the init command and the auto-creation path in New().
@@ -11,13 +14,18 @@ func DefaultConfigTemplate() string {
 
 // DefaultServersTemplate returns the platform-appropriate servers.yaml template.
 // On Windows it returns the Windows-specific template with Windows paths,
-// executable extensions, and platform-specific comments. On all other
-// platforms it returns the Unix (Linux/macOS) template.
+// executable extensions, and platform-specific comments. On macOS the Unix
+// template's example home paths are rewritten to /Users form; Linux gets the
+// Unix template as-is.
 func DefaultServersTemplate() string {
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		return defaultServersTemplateWindows
+	case "darwin":
+		return strings.ReplaceAll(defaultServersTemplate, "/home/your-user", "/Users/your-user")
+	default:
+		return defaultServersTemplate
 	}
-	return defaultServersTemplate
 }
 
 // DefaultToolOverridesTemplate returns the embedded default tool_overrides.yaml template.
