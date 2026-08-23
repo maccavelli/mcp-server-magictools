@@ -794,6 +794,7 @@ func uninstallWindows() error {
 	}
 
 	// B2: stop + delete the SCM service (idempotent if absent).
+	//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
 	if err := uninstallWindowsService(); err != nil {
 		return err
 	}
@@ -964,6 +965,7 @@ var serviceStartCmd = &cobra.Command{
 				}
 			}
 		case goOSWindows:
+			//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
 			if err := startWindowsService(); err != nil {
 				return fmt.Errorf("failed to start windows service: %w", err)
 			}
@@ -1001,6 +1003,7 @@ var serviceStopCmd = &cobra.Command{
 				return fmt.Errorf("launchctl kill failed: %s: %w", string(out), killErr)
 			}
 		case goOSWindows:
+			//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
 			if err := stopWindowsService(); err != nil {
 				return fmt.Errorf("failed to stop windows service: %w", err)
 			}
@@ -1147,6 +1150,7 @@ var serviceDoctorCmd = &cobra.Command{
 				fmt.Printf("  ✓ LaunchAgent plist exists: %s\n", plistPath)
 			}
 		case goOSWindows:
+			//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
 			if installed, err := windowsServiceInstalled(); err != nil {
 				fmt.Printf("  ✗ Could not query service manager: %v\n", err)
 				issues++
