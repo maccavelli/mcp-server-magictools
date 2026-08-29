@@ -55,8 +55,16 @@ func TestAdvertisedEmbeddersConstruct(t *testing.T) {
 }
 
 func TestUnadvertisedGenerativeProvidersRejected(t *testing.T) {
-	// Generative Ollama and Voyage must return unsupported provider error from mcplib
-	unsupported := []string{ProviderOllama, ProviderVoyage}
+	// This repo's catalog carries providers mcplib does not model as generative.
+	// Constructing one as a generative provider must fail, so an embedding-only
+	// provider cannot be selected for a text tier by mistake.
+	//
+	// Ollama was in this list until mcplib v1.2.0, which promoted it from
+	// listing-only to a real Provider (MADR 0004 Phase 3). It is now
+	// constructible by design, so asserting it fails would assert the opposite
+	// of the current contract. Voyage remains: mcplib has no embedding
+	// abstraction, so it is genuinely unsupported there.
+	unsupported := []string{ProviderVoyage}
 	for _, id := range unsupported {
 		_, err := llmprovider.NewProvider(id, "dummy-key", "dummy-model")
 		if err == nil {
