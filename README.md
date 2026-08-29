@@ -1,9 +1,9 @@
+<!-- markdownlint-disable MD013 MD060 MD033 MD041 -->
+
 > **Mirror notice:** This repository is a one-way published export of a
 > privately hosted project. History is squashed into sync snapshots, and pull
 > requests cannot be merged here directly — open an issue instead. Changes
 > land in the private source and are re-exported.
-
-<!-- markdownlint-disable MD013 MD060 MD033 -->
 
 # 🪄 MagicTools Orchestrator
 
@@ -109,6 +109,25 @@ point directly at your Go installation (see [IDE Configuration](#6-ide-configura
 This walkthrough covers the complete path from downloading the binary to having MagicTools
 running in your IDE on **Linux**, **macOS**, or **Windows**.
 
+### One-line install
+
+**Linux or macOS:**
+
+```bash
+curl -fsSL https://github.com/maccavelli/mcp-server-magictools/releases/latest/download/install.sh | sh
+```
+
+**Windows PowerShell:**
+
+```powershell
+irm https://github.com/maccavelli/mcp-server-magictools/releases/latest/download/install.ps1 | iex
+```
+
+The installer verifies the release checksum and only places the executable in
+`~/.local/bin` on Linux/macOS or
+`%LOCALAPPDATA%\Programs\magictools` on Windows. It does not run `configure`,
+initialize configuration, or install/start the background service.
+
 ### 1. Download the Binary
 
 Download the latest release for your platform from the project's release page, or build from source:
@@ -117,11 +136,11 @@ Download the latest release for your platform from the project's release page, o
 
 ```bash
 # Linux (amd64)
-curl -L -o mcp-server-magictools https://github.com/your-org/releases/latest/download/mcp-server-magictools-linux-amd64
+curl -L -o mcp-server-magictools https://github.com/maccavelli/mcp-server-magictools/releases/latest/download/mcp-server-magictools-linux-amd64
 chmod +x mcp-server-magictools
 
 # macOS (Apple Silicon)
-curl -L -o mcp-server-magictools https://github.com/your-org/releases/latest/download/mcp-server-magictools-darwin-arm64
+curl -L -o mcp-server-magictools https://github.com/maccavelli/mcp-server-magictools/releases/latest/download/mcp-server-magictools-darwin-arm64
 chmod +x mcp-server-magictools
 
 # Windows (amd64) — download mcp-server-magictools.exe from the release page
@@ -159,9 +178,9 @@ mv mcp-server-magictools ~/.local/bin/
 **Windows (PowerShell):**
 
 ```powershell
-Move-Item mcp-server-magictools.exe "$env:LOCALAPPDATA\Programs\mcp-server-magictools\mcp-server-magictools.exe"
+Move-Item mcp-server-magictools.exe "$env:LOCALAPPDATA\Programs\magictools\mcp-server-magictools.exe"
 # Add to PATH via System Settings > Environment Variables, or:
-# [Environment]::SetEnvironmentVariable("PATH", "$env:PATH;$env:LOCALAPPDATA\Programs\mcp-server-magictools", "User")
+# [Environment]::SetEnvironmentVariable("PATH", "$env:PATH;$env:LOCALAPPDATA\Programs\magictools", "User")
 ```
 
 ### 3. Initialize Configuration
@@ -375,7 +394,8 @@ The IDE spawns MagicTools as a child process. No service installation required.
 The IDE spawns a lightweight `proxy` subprocess that bridges stdio ↔ HTTP to the running service.
 This allows multiple IDE windows to share a single orchestrator instance.
 
-**Requires:** `mcp-server-magictools service install` completed first (see [Step 5](#5-optional-install-as-a-system-service)).
+**Requires:** `mcp-server-magictools service install` completed first
+(see [Optional: Install as a System Service](#optional-install-as-a-system-service)).
 
 **Antigravity / Gemini:**
 
@@ -431,7 +451,8 @@ This allows multiple IDE windows to share a single orchestrator instance.
 The IDE connects directly to the running service via HTTP. No child process is spawned.
 This requires an IDE that supports the MCP Streamable HTTP transport with `serverUrl`.
 
-**Requires:** `mcp-server-magictools service install` completed first (see [Step 5](#5-optional-install-as-a-system-service)).
+**Requires:** `mcp-server-magictools service install` completed first
+(see [Optional: Install as a System Service](#optional-install-as-a-system-service)).
 
 **Antigravity / Gemini:**
 
@@ -791,7 +812,6 @@ Written dynamically to the configuration directory upon service start, mapping t
   "binary_path": "/usr/local/bin/mcp-server-magictools"
 }
 ```
-
 
 ---
 
