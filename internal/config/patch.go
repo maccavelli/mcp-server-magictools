@@ -44,6 +44,7 @@ type ThinkingTierPatch struct {
 	ThinkingModel     Field[string]
 	ThinkingAPIKey    Field[string]
 	ThinkingAPIKeyEnv Field[string]
+	ThinkingAPIURL    Field[string]
 }
 
 // EmbeddingPatch defines owned patch fields for the Embedding Engine block.

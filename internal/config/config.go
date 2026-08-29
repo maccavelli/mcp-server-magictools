@@ -251,6 +251,7 @@ type IntelligenceEngine struct {
 	ThinkingProvider string `json:"thinking_provider,omitempty,omitzero" mapstructure:"thinking_provider" yaml:"thinking_provider,omitempty"`
 	ThinkingModel    string `json:"thinking_model,omitempty,omitzero" mapstructure:"thinking_model" yaml:"thinking_model,omitempty"`
 	ThinkingAPIKey   string `json:"thinking_api_key,omitempty,omitzero" mapstructure:"thinking_api_key" yaml:"thinking_api_key,omitempty"`
+	ThinkingAPIURL   string `json:"thinking_api_url,omitempty,omitzero" mapstructure:"thinking_api_url" yaml:"thinking_api_url,omitempty"`
 
 	// Shared LLM Backplane controls
 	SharedLLMEnabled  bool `json:"shared_llm_enabled,omitempty,omitzero" mapstructure:"shared_llm_enabled" yaml:"shared_llm_enabled,omitempty"`
@@ -767,6 +768,9 @@ func (c *Config) SaveConfiguration() error {
 		}
 		if c.Intelligence.ThinkingAPIKey != "" {
 			setNodeValue(intelNode, "thinking_api_key", c.Intelligence.ThinkingAPIKey)
+		}
+		if c.Intelligence.ThinkingAPIURL != "" {
+			setNodeValue(intelNode, "thinking_api_url", c.Intelligence.ThinkingAPIURL)
 		}
 
 		// Shared LLM Backplane

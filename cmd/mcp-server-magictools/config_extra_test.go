@@ -1,20 +1,23 @@
 package main
 
 import (
-	"bufio"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/maccavelli/mcp-server-magictools/internal/config"
+	"github.com/maccavelli/mcplib/logging"
 )
 
 func TestConfigHelpers(t *testing.T) {
-	if maskKey("123456789") != "****6789" {
-		t.Errorf("maskKey failed: got %q", maskKey("123456789"))
+	// Credential display is logging.MaskSecret now, not a local maskKey. The
+	// formats differ substantively: maskKey("short") returned "****hort",
+	// revealing four of five characters, where MaskSecret reveals none below
+	// its eight-rune threshold. See PLAN 0004 deviation D4.
+	if got := logging.MaskSecret("123456789"); got != "••••••••6789" {
+		t.Errorf("MaskSecret(\"123456789\") = %q", got)
 	}
-	if maskKey("short") != "****hort" {
-		t.Error("maskKey short failed")
+	if got := logging.MaskSecret("short"); got != "••••••••" {
+		t.Errorf("MaskSecret(\"short\") = %q, want no revealed characters", got)
 	}
 
 	if choiceToProvider("1") != "gemini" {
@@ -54,10 +57,6 @@ func TestConfigUIFunctions(t *testing.T) {
 	t.Skip("Skipping interactive UI test that requires stdin")
 	cfg, _ := config.New("", "")
 
-	// Create a dummy reader
-	input := "1\nkey\n1\n\n\n\n"
-	reader := bufio.NewReader(strings.NewReader(input))
-
 	// We might panic or fail early, but it will execute lines
 	defer func() {
 		recover()
@@ -65,9 +64,9 @@ func TestConfigUIFunctions(t *testing.T) {
 
 	showCurrentConfig(cfg)
 	configureBackplane(cfg, &config.BackplanePatch{})
-	configureFastTier(cfg, &config.FastTierPatch{}, reader)
-	configureThinkingTier(cfg, &config.ThinkingTierPatch{}, reader)
-	configureEmbeddingEngine(cfg, &config.EmbeddingPatch{}, reader)
+	configureFastTier(cfg, &config.FastTierPatch{})
+	configureThinkingTier(cfg, &config.ThinkingTierPatch{})
+	configureEmbeddingEngine(cfg, &config.EmbeddingPatch{})
 }
 
 func TestEnsureInitialized(t *testing.T) {
