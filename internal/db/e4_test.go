@@ -13,6 +13,7 @@ func TestSearchIndex_ExactNameBoost(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSearchIndex: %v", err)
 	}
+	defer si.Close()
 
 	if err := si.IndexRecord(ToBleveDoc(&ToolRecord{
 		URN: "a:foo_bar", Name: "foo_bar", Server: "a", Description: "alpha tool",

@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -64,14 +65,20 @@ func TestOpenHardenedLogFile_CreatesParentDir(t *testing.T) {
 		t.Fatalf("expected log file to exist at %s: %v", path, err)
 	}
 
-	// Verify parent directory permissions are 0750
+	// Windows does not preserve Unix permission bits.
+	if runtime.GOOS == "windows" {
+		return
+	}
+
+	// Verify parent directory permissions are no broader than 0750. A restrictive
+	// process umask may remove group bits from the requested mode.
 	info, err := os.Stat(filepath.Dir(path))
 	if err != nil {
 		t.Fatalf("expected parent dir to exist: %v", err)
 	}
 	perm := info.Mode().Perm()
-	if perm != 0750 {
-		t.Errorf("expected parent dir perm 0750, got %04o", perm)
+	if perm&^os.FileMode(0750) != 0 {
+		t.Errorf("expected parent dir perm no broader than 0750, got %04o", perm)
 	}
 }
 

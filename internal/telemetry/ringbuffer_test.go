@@ -14,7 +14,14 @@ func TestRingBufferLengthPrefixedGauges(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer rb.file.Close()
+	defer func() {
+		if err := rb.mmap.Unmap(); err != nil {
+			t.Errorf("unmap ring buffer: %v", err)
+		}
+		if err := rb.file.Close(); err != nil {
+			t.Errorf("close ring buffer: %v", err)
+		}
+	}()
 
 	payload := map[string]any{"search": map[string]any{"total_searches": 42}}
 	if err := rb.WriteGauges(payload); err != nil {

@@ -27,6 +27,7 @@ func TestBLV8_PrunedFieldsNotSearchable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSearchIndex: %v", err)
 	}
+	defer si.Close()
 
 	// One token lives ONLY in a pruned field, another ONLY in a kept field. Neither
 	// appears in name/description/etc., so each token's matchability is decided purely

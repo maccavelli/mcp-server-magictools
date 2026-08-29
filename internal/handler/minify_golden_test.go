@@ -91,8 +91,9 @@ func TestMinifyResponse_Golden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read golden (generate first with UPDATE_GOLDEN=1): %v", err)
 	}
-	if got != string(want) {
-		t.Errorf("MinifyResponse output changed (M5 parity broken):\n--- got ---\n%s\n--- want ---\n%s", got, string(want))
+	wantText := strings.ReplaceAll(string(want), "\r\n", "\n")
+	if got != wantText {
+		t.Errorf("MinifyResponse output changed (M5 parity broken):\n--- got ---\n%s\n--- want ---\n%s", got, wantText)
 	}
 }
 

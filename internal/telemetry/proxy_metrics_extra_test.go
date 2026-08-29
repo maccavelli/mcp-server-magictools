@@ -1,7 +1,6 @@
 package telemetry
 
 import (
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -13,17 +12,19 @@ func TestProxyMetrics(t *testing.T) {
 		Timestamp:          time.Now(),
 	})
 
-	// atomic: the background flusher goroutine writes this while the test reads it.
-	var called atomic.Bool
+	saved := make(chan struct{}, 1)
 	save := func(key string, val []byte, ttl time.Duration) error {
-		called.Store(true)
+		select {
+		case saved <- struct{}{}:
+		default:
+		}
 		return nil
 	}
 
 	StartMetricsFlusher(save)
-	time.Sleep(10 * time.Millisecond) // let the flusher run
-
-	if !called.Load() {
-		t.Error("expected save function to be called")
+	select {
+	case <-saved:
+	case <-time.After(time.Second):
+		t.Fatal("expected save function to be called")
 	}
 }

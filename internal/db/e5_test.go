@@ -13,6 +13,7 @@ func TestPruneSyntheticDocs_CapsGrowth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSearchIndex: %v", err)
 	}
+	defer si.Close()
 
 	for i := range 5 {
 		if err := si.IndexSyntheticIntent(fmt.Sprintf("prompt-%d", i), []string{"a:tool"}); err != nil {
