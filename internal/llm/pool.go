@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -102,7 +103,7 @@ func NewPool(cfg *config.Config) (*Pool, error) {
 	}
 
 	// Fast tier (required)
-	fast, err := createProvider(ie.Provider, ie.APIKey, ie.Model, llmprovider.WithHTTPClient(httpClient))
+	fast, err := createProvider(ie.Provider, ie.APIKey, ie.Model, tierOpts(httpClient, ie.APIURL)...)
 	if err != nil {
 		return nil, fmt.Errorf("llm pool: fast tier init failed: %w", err)
 	}
@@ -110,7 +111,7 @@ func NewPool(cfg *config.Config) (*Pool, error) {
 	// Thinking tier (optional — nil if unconfigured)
 	var thinking Provider
 	if ie.ThinkingProvider != "" && ie.ThinkingAPIKey != "" && ie.ThinkingModel != "" {
-		thinking, err = createProvider(ie.ThinkingProvider, ie.ThinkingAPIKey, ie.ThinkingModel, llmprovider.WithHTTPClient(httpClient))
+		thinking, err = createProvider(ie.ThinkingProvider, ie.ThinkingAPIKey, ie.ThinkingModel, tierOpts(httpClient, ie.ThinkingAPIURL)...)
 		if err != nil {
 			slog.Warn("llm pool: thinking tier init failed, disabled", "error", err)
 		}
@@ -364,7 +365,7 @@ func (p *Pool) Reload(cfg *config.Config) {
 	var newThinking Provider
 	var thinkingErr error
 	if ie.ThinkingProvider != "" && ie.ThinkingAPIKey != "" && ie.ThinkingModel != "" {
-		newThinking, thinkingErr = createProvider(ie.ThinkingProvider, ie.ThinkingAPIKey, ie.ThinkingModel, llmprovider.WithHTTPClient(p.client))
+		newThinking, thinkingErr = createProvider(ie.ThinkingProvider, ie.ThinkingAPIKey, ie.ThinkingModel, tierOpts(p.client, ie.ThinkingAPIURL)...)
 		if thinkingErr != nil {
 			slog.Warn("llm pool: hot-reload thinking tier failed, keeping old provider", "error", thinkingErr)
 		}
@@ -471,6 +472,18 @@ func (r *rateLimitedProvider) Generate(ctx context.Context, prompt string) (stri
 // createProvider constructs a Provider from config strings.
 func createProvider(providerName, apiKey, model string, opts ...llmprovider.ProviderOption) (Provider, error) {
 	return llmprovider.NewProvider(providerName, apiKey, model, opts...)
+}
+
+// tierOpts builds the provider options for one tier. The endpoint is honoured
+// when configured: Ollama and the four gateway providers are reached at an
+// address the user chooses, and the wizard has always collected it. It was
+// never passed through until MADR 0004 deviation D6.
+func tierOpts(client *http.Client, baseURL string) []llmprovider.ProviderOption {
+	opts := []llmprovider.ProviderOption{llmprovider.WithHTTPClient(client)}
+	if u := strings.TrimSpace(baseURL); u != "" {
+		opts = append(opts, llmprovider.WithBaseURL(u))
+	}
+	return opts
 }
 
 // generateForTier dispatches to the provider's extended-thinking path for the thinking

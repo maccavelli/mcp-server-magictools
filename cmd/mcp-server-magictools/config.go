@@ -1,13 +1,13 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pterm/pterm"
 	"github.com/spf13/cobra"
@@ -16,7 +16,13 @@ import (
 	"github.com/maccavelli/mcp-server-magictools/internal/config"
 	"github.com/maccavelli/mcp-server-magictools/internal/provider"
 	"github.com/maccavelli/mcplib/llmprovider"
+	"github.com/maccavelli/mcplib/logging"
+	"github.com/maccavelli/mcplib/wizard"
 )
+
+// discoveryTimeout bounds a live model listing so an unreachable provider
+// cannot stall the wizard.
+const discoveryTimeout = 20 * time.Second
 
 var forceInit bool
 var nonInteractive bool
@@ -25,14 +31,6 @@ var configureCmd = &cobra.Command{
 	Use:   "configure",
 	Short: "Interactive setup wizard for the MagicTools orchestrator",
 	RunE:  runConfigure,
-}
-
-// providerEnvVars maps provider names to their standard environment variable names.
-var providerEnvVars = map[string]string{
-	"gemini": "GEMINI_API_KEY",
-	"openai": "OPENAI_API_KEY",
-	"claude": "CLAUDE_API_KEY",
-	"voyage": "VOYAGE_API_KEY",
 }
 
 func runConfigure(cmd *cobra.Command, args []string) error {
@@ -66,7 +64,6 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("interactive terminal required for configure wizard")
 	}
 
-	reader := bufio.NewReader(os.Stdin)
 	var stagedPatch config.ConfigurationPatch
 
 	for {
@@ -91,11 +88,11 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 		if len(choice) > 0 {
 			switch choice[:1] {
 			case "1":
-				configureFastTier(cfg, &stagedPatch.Fast, reader)
+				configureFastTier(cfg, &stagedPatch.Fast)
 			case "2":
-				configureThinkingTier(cfg, &stagedPatch.Thinking, reader)
+				configureThinkingTier(cfg, &stagedPatch.Thinking)
 			case "3":
-				configureEmbeddingEngine(cfg, &stagedPatch.Embedding, reader)
+				configureEmbeddingEngine(cfg, &stagedPatch.Embedding)
 			case "4":
 				configureBackplane(cfg, &stagedPatch.Backplane)
 			case "5":
@@ -127,179 +124,104 @@ func runConfigure(cmd *cobra.Command, args []string) error {
 
 // --- Option 1 — Fast Tier LLM ---
 
-func configureFastTier(cfg *config.Config, patch *config.FastTierPatch, reader *bufio.Reader) {
+func configureFastTier(cfg *config.Config, patch *config.FastTierPatch) {
 	pterm.DefaultSection.Println("Fast Tier LLM Configuration")
 
-	spec, ok := selectProviderForTier(provider.TierFast)
-	if !ok {
+	res, err := configureTier(provider.TierFast, wizard.Result{
+		Provider: cfg.Intelligence.Provider,
+		APIKey:   cfg.Intelligence.APIKey,
+		Model:    cfg.Intelligence.Model,
+		BaseURL:  cfg.Intelligence.APIURL,
+	}, true)
+	if err != nil {
+		pterm.Warning.Printf("Fast Tier not configured: %v\n", err)
 		return
 	}
-	provID := spec.ID
-
-	var apiKey string
-	if spec.IsLocal {
-		ollamaURL := promptOllamaURL()
-		cfg.Intelligence.APIURL = ollamaURL
-		patch.APIURL = config.Set(ollamaURL)
-	} else {
-		apiKey = resolveAPIKey(cfg.Intelligence.APIKey, provID, reader)
-		if apiKey == "" {
-			fmt.Println("No API key provided. Returning to menu.")
-			return
-		}
-	}
-
-	// Discover models
-	pterm.Info.Println("Fetching available models...")
-	ctx := context.Background()
-	models, err := llmprovider.ListAvailableModels(ctx, provID, apiKey)
-	if err != nil || len(models) == 0 {
-		pterm.Warning.Println("Could not reach API, using default model list.")
-		models = staticModelsForProvider(provID)
-	}
-
-	selectedModel := selectModel(models)
-	if selectedModel == "" {
-		pterm.Info.Println("No model selected. Returning to menu.")
-		return
-	}
-
-	// Build fallback list from remaining models
-	var fallbacks []string
-	for _, m := range models {
-		if m != selectedModel {
-			fallbacks = append(fallbacks, m)
-		}
-	}
-
-	// Stage changes
-	cfg.Intelligence.Provider = provID
-	cfg.Intelligence.APIKey = apiKey
-	cfg.Intelligence.Model = selectedModel
-	cfg.Intelligence.FallbackModels = fallbacks
 
 	retryCount := valOrDefault(cfg.Intelligence.RetryCount, 2)
 	retryDelay := valOrDefault(cfg.Intelligence.RetryDelay, 5)
 	timeoutSecs := valOrDefault(cfg.Intelligence.TimeoutSeconds, 120)
 
+	cfg.Intelligence.Provider = res.Provider
+	cfg.Intelligence.Model = res.Model
+	cfg.Intelligence.APIKey = res.APIKey
+	cfg.Intelligence.APIURL = res.BaseURL
+	cfg.Intelligence.FallbackModels = res.Fallbacks
 	cfg.Intelligence.RetryCount = retryCount
 	cfg.Intelligence.RetryDelay = retryDelay
 	cfg.Intelligence.TimeoutSeconds = timeoutSecs
 
-	patch.Provider = config.Set(provID)
-	patch.Model = config.Set(selectedModel)
-	patch.APIKey = config.Set(apiKey)
-	patch.FallbackModels = config.Set(fallbacks)
+	patch.Provider = config.Set(res.Provider)
+	patch.Model = config.Set(res.Model)
+	patch.APIKey = config.Set(res.APIKey)
+	// Written unconditionally: an empty endpoint must clear one left by a
+	// previously configured provider rather than be silently retained.
+	patch.APIURL = config.Set(res.BaseURL)
+	patch.FallbackModels = config.Set(res.Fallbacks)
 	patch.RetryCount = config.Set(retryCount)
 	patch.RetryDelay = config.Set(retryDelay)
 	patch.TimeoutSeconds = config.Set(timeoutSecs)
 
 	pterm.Success.Println("Fast Tier staged!")
-	pterm.Info.Printf("Provider:  %s\n", provID)
-	pterm.Info.Printf("Model:     %s\n", selectedModel)
-	if len(fallbacks) > 0 {
-		pterm.Info.Printf("Fallbacks: %s\n", strings.Join(fallbacks, ", "))
-	}
+	printTierSummary(res)
 }
 
 // --- Option 2 — Thinking Tier LLM ---
 
-func configureThinkingTier(cfg *config.Config, patch *config.ThinkingTierPatch, reader *bufio.Reader) {
+func configureThinkingTier(cfg *config.Config, patch *config.ThinkingTierPatch) {
 	pterm.DefaultSection.Println("Thinking Tier LLM Configuration")
 	pterm.Info.Println("The Thinking Tier provides a dedicated model for deep reasoning tasks\n(Socratic analysis, complex code review). If not configured, the Fast\nTier model handles all requests.")
 
-	specs := provider.ForTier(provider.TierThinking)
-	var options []string
-	for i, s := range specs {
-		options = append(options, fmt.Sprintf("%d) %s", i+1, s.Label))
+	// "Disable" is a MagicTools concept with no equivalent in the shared
+	// wizard, so it is asked before handing over.
+	keep, err := ptermPrompter{}.Confirm("Configure a thinking tier? (No clears it)", true)
+	if err != nil {
+		pterm.Warning.Printf("Thinking Tier not configured: %v\n", err)
+		return
 	}
-	options = append(options, "0) None/Clear (disable thinking tier)")
-
-	choice, _ := pterm.DefaultInteractiveSelect.
-		WithDefaultText("Select provider").
-		WithOptions(options).
-		Show()
-
-	if len(choice) > 0 && strings.HasPrefix(choice, "0)") {
+	if !keep {
 		cfg.Intelligence.ThinkingProvider = ""
 		cfg.Intelligence.ThinkingModel = ""
 		cfg.Intelligence.ThinkingAPIKey = ""
+		cfg.Intelligence.ThinkingAPIURL = ""
 
 		patch.ThinkingProvider = config.Remove[string]()
 		patch.ThinkingModel = config.Remove[string]()
 		patch.ThinkingAPIKey = config.Remove[string]()
+		patch.ThinkingAPIURL = config.Remove[string]()
 
 		pterm.Success.Println("Thinking Tier staged for removal.")
 		return
 	}
 
-	var selectedSpec provider.ProviderSpec
-	for i, s := range specs {
-		if strings.HasPrefix(choice, fmt.Sprintf("%d)", i+1)) {
-			selectedSpec = s
-			break
-		}
-	}
-
-	if selectedSpec.ID == "" {
-		pterm.Warning.Println("Invalid choice. Returning to menu.")
-		return
-	}
-	provID := selectedSpec.ID
-
-	var apiKey string
-	if !selectedSpec.IsLocal {
-		if provID == cfg.Intelligence.Provider && cfg.Intelligence.APIKey != "" {
-			fmt.Printf("You already have a %s API key configured for the Fast Tier.\n", provID)
-			fmt.Print("Press Enter to reuse it, or enter a different key: ")
-			override := readHiddenSecret(reader)
-			if override != "" {
-				apiKey = override
-			} else {
-				apiKey = cfg.Intelligence.APIKey
-			}
-		} else {
-			apiKey = resolveAPIKey(cfg.Intelligence.ThinkingAPIKey, provID, reader)
-			if apiKey == "" {
-				pterm.Warning.Println("No API key provided. Returning to menu.")
-				return
-			}
-		}
-	}
-
-	// Discover models — present top 3 thinking-capable
-	pterm.Info.Println("Fetching available models...")
-	ctx := context.Background()
-	models, err := llmprovider.ListAvailableModels(ctx, provID, apiKey)
-	if err != nil || len(models) == 0 {
-		models = staticModelsForProvider(provID)
-	}
-	if len(models) > 3 {
-		models = models[:3]
-	}
-
-	selectedModel := selectModel(models)
-	if selectedModel == "" {
-		pterm.Info.Println("No model selected. Returning to menu.")
+	res, err := configureTier(provider.TierThinking, wizard.Result{
+		Provider: cfg.Intelligence.ThinkingProvider,
+		APIKey:   cfg.Intelligence.ThinkingAPIKey,
+		Model:    cfg.Intelligence.ThinkingModel,
+		BaseURL:  cfg.Intelligence.ThinkingAPIURL,
+	}, false)
+	if err != nil {
+		pterm.Warning.Printf("Thinking Tier not configured: %v\n", err)
 		return
 	}
 
-	cfg.Intelligence.ThinkingProvider = provID
-	cfg.Intelligence.ThinkingModel = selectedModel
-	cfg.Intelligence.ThinkingAPIKey = apiKey
+	cfg.Intelligence.ThinkingProvider = res.Provider
+	cfg.Intelligence.ThinkingModel = res.Model
+	cfg.Intelligence.ThinkingAPIKey = res.APIKey
+	cfg.Intelligence.ThinkingAPIURL = res.BaseURL
 
-	patch.ThinkingProvider = config.Set(provID)
-	patch.ThinkingModel = config.Set(selectedModel)
-	patch.ThinkingAPIKey = config.Set(apiKey)
+	patch.ThinkingProvider = config.Set(res.Provider)
+	patch.ThinkingModel = config.Set(res.Model)
+	patch.ThinkingAPIKey = config.Set(res.APIKey)
+	patch.ThinkingAPIURL = config.Set(res.BaseURL)
 
 	pterm.Success.Println("Thinking Tier staged!")
-	pterm.Info.Printf("Provider: %s\n", provID)
-	pterm.Info.Printf("Model:    %s\n", selectedModel)
+	printTierSummary(res)
 }
 
 // --- Option 3 — Embedding Engine ---
 
-func configureEmbeddingEngine(cfg *config.Config, patch *config.EmbeddingPatch, reader *bufio.Reader) {
+func configureEmbeddingEngine(cfg *config.Config, patch *config.EmbeddingPatch) {
 	pterm.DefaultSection.Println("Embedding Engine Configuration")
 
 	specs := provider.ForTier(provider.TierEmbedding)
@@ -349,35 +271,26 @@ func configureEmbeddingEngine(cfg *config.Config, patch *config.EmbeddingPatch, 
 	models := selectedSpec.StaticModels[provider.TierEmbedding]
 	dimsMap := selectedSpec.Dimensions
 
+	// The embedding tier keeps its own flow: llmprovider has no embedding
+	// abstraction, so its dimension-annotated catalog and Voyage have no
+	// equivalent in wizard.Result. Only the credential and endpoint prompts are
+	// shared. See MADR 0004 scope boundaries and PLAN 0004 deviation D7.
 	var apiKey string
 	var apiURL string
 	if selectedSpec.IsLocal {
-		apiURL = promptOllamaURL()
+		apiURL = promptEndpoint(selectedSpec, cfg.Intelligence.EmbeddingAPIURL)
 	} else {
-		if provID == cfg.Intelligence.Provider && cfg.Intelligence.APIKey != "" {
-			fmt.Printf("You already have a %s API key configured for the Fast Tier.\n", provID)
-			fmt.Print("Press Enter to reuse it, or enter a different key: ")
-			override := readHiddenSecret(reader)
-			if override != "" {
-				apiKey = override
-			} else {
-				apiKey = cfg.Intelligence.APIKey
-			}
-		} else if provID == cfg.Intelligence.ThinkingProvider && cfg.Intelligence.ThinkingAPIKey != "" {
-			fmt.Printf("You already have a %s API key configured for the Thinking Tier.\n", provID)
-			fmt.Print("Press Enter to reuse it, or enter a different key: ")
-			override := readHiddenSecret(reader)
-			if override != "" {
-				apiKey = override
-			} else {
-				apiKey = cfg.Intelligence.ThinkingAPIKey
-			}
-		} else {
-			apiKey = resolveAPIKey(cfg.Intelligence.EmbeddingAPIKey, provID, reader)
-			if apiKey == "" {
-				pterm.Warning.Println("No API key provided. Returning to menu.")
-				return
-			}
+		switch {
+		case provID == cfg.Intelligence.Provider && cfg.Intelligence.APIKey != "":
+			apiKey = reuseTierKey(selectedSpec, "Fast Tier", cfg.Intelligence.APIKey)
+		case provID == cfg.Intelligence.ThinkingProvider && cfg.Intelligence.ThinkingAPIKey != "":
+			apiKey = reuseTierKey(selectedSpec, "Thinking Tier", cfg.Intelligence.ThinkingAPIKey)
+		default:
+			apiKey = promptTierAPIKey(selectedSpec, cfg.Intelligence.EmbeddingAPIKey)
+		}
+		if apiKey == "" {
+			pterm.Warning.Println("No API key provided. Returning to menu.")
+			return
 		}
 	}
 
@@ -429,7 +342,7 @@ func configureEmbeddingEngine(cfg *config.Config, patch *config.EmbeddingPatch, 
 	cfg.Intelligence.EmbeddingProvider = provID
 	cfg.Intelligence.EmbeddingModel = actualModel
 	cfg.Intelligence.EmbeddingAPIKey = apiKey
-	if provID == "ollama" {
+	if apiURL != "" {
 		cfg.Intelligence.EmbeddingAPIURL = apiURL
 	}
 	cfg.Intelligence.EmbeddingDimensionality = dims
@@ -438,7 +351,7 @@ func configureEmbeddingEngine(cfg *config.Config, patch *config.EmbeddingPatch, 
 	patch.EmbeddingProvider = config.Set(provID)
 	patch.EmbeddingModel = config.Set(actualModel)
 	patch.EmbeddingAPIKey = config.Set(apiKey)
-	if provID == "ollama" {
+	if apiURL != "" {
 		patch.EmbeddingAPIURL = config.Set(apiURL)
 	}
 	patch.EmbeddingDimensionality = config.Set(dims)
@@ -522,7 +435,10 @@ func showCurrentConfig(cfg *config.Config) {
 	if cfg.Intelligence.Provider != "" {
 		fmt.Printf("  Provider:  %s\n", cfg.Intelligence.Provider)
 		fmt.Printf("  Model:     %s\n", cfg.Intelligence.Model)
-		fmt.Printf("  API Key:   %s\n", maskKey(cfg.Intelligence.APIKey))
+		fmt.Printf("  API Key:   %s\n", logging.MaskSecret(cfg.Intelligence.APIKey))
+		if cfg.Intelligence.APIURL != "" {
+			fmt.Printf("  Endpoint:  %s\n", cfg.Intelligence.APIURL)
+		}
 		if len(cfg.Intelligence.FallbackModels) > 0 {
 			fmt.Printf("  Fallbacks: %s\n", strings.Join(cfg.Intelligence.FallbackModels, ", "))
 		}
@@ -534,7 +450,10 @@ func showCurrentConfig(cfg *config.Config) {
 	if cfg.Intelligence.ThinkingProvider != "" {
 		fmt.Printf("  Provider:  %s\n", cfg.Intelligence.ThinkingProvider)
 		fmt.Printf("  Model:     %s\n", cfg.Intelligence.ThinkingModel)
-		fmt.Printf("  API Key:   %s\n", maskKey(cfg.Intelligence.ThinkingAPIKey))
+		fmt.Printf("  API Key:   %s\n", logging.MaskSecret(cfg.Intelligence.ThinkingAPIKey))
+		if cfg.Intelligence.ThinkingAPIURL != "" {
+			fmt.Printf("  Endpoint:  %s\n", cfg.Intelligence.ThinkingAPIURL)
+		}
 	} else {
 		fmt.Println("  (not configured)")
 	}
@@ -545,7 +464,7 @@ func showCurrentConfig(cfg *config.Config) {
 		fmt.Printf("  Model:          %s\n", cfg.Intelligence.EmbeddingModel)
 		fmt.Printf("  Dimensions:     %d\n", cfg.Intelligence.EmbeddingDimensionality)
 		fmt.Printf("  Vector Enabled: %v\n", cfg.Intelligence.VectorEnabled)
-		fmt.Printf("  API Key:        %s\n", maskKey(cfg.Intelligence.EmbeddingAPIKey))
+		fmt.Printf("  API Key:        %s\n", logging.MaskSecret(cfg.Intelligence.EmbeddingAPIKey))
 	} else {
 		fmt.Println("  (not configured)")
 	}
@@ -562,25 +481,108 @@ func showCurrentConfig(cfg *config.Config) {
 
 // ===== Shared Helpers =====
 
-func readHiddenSecret(reader *bufio.Reader) string {
-	fd := int(os.Stdin.Fd())
-	if term.IsTerminal(fd) {
-		result, _ := pterm.DefaultInteractiveTextInput.WithMask("*").Show()
-		return strings.TrimSpace(result)
+// configureTier runs the canonical wizard restricted to the providers that may
+// serve one tier. The restriction is a plain id list computed here, so mcplib
+// never learns what a tier is.
+//
+// Only providers with an llmprovider descriptor are offered: a tier that runs a
+// generation needs a Provider, and Voyage — embedding-only — has none.
+func configureTier(tier provider.Tier, existing wizard.Result, needFallbacks bool) (wizard.Result, error) {
+	var ids []string
+	for _, spec := range provider.ForTier(tier) {
+		if _, ok := llmprovider.DescriptorFor(spec.ID); ok {
+			ids = append(ids, spec.ID)
+		}
 	}
-	pterm.Warning.Println("Terminal does not support hidden input. Your key will be visible as you type.")
-	input, _ := reader.ReadString('\n')
-	return strings.TrimSpace(input)
+	return wizard.ConfigureLLM(context.Background(), ptermPrompter{}, wizard.Options{
+		Providers:     ids,
+		Existing:      existing,
+		AllowEnv:      true,
+		Discover:      true,
+		DiscoverLimit: discoveryTimeout,
+		NeedFallbacks: needFallbacks,
+	})
 }
 
-func maskKey(key string) string {
-	if key == "" {
-		return "—"
+func printTierSummary(res wizard.Result) {
+	pterm.Info.Printf("Provider:  %s\n", res.Provider)
+	pterm.Info.Printf("Model:     %s\n", res.Model)
+	if res.BaseURL != "" {
+		pterm.Info.Printf("Endpoint:  %s\n", res.BaseURL)
 	}
-	if len(key) >= 5 {
-		return "****" + key[len(key)-4:]
+	if len(res.Fallbacks) > 0 {
+		pterm.Info.Printf("Fallbacks: %s\n", strings.Join(res.Fallbacks, ", "))
 	}
-	return "****"
+}
+
+// promptTierAPIKey applies the precedence environment → existing → prompt for
+// the embedding tier, whose providers the shared wizard does not cover. The
+// generative tiers get this from wizard.ConfigureLLM.
+func promptTierAPIKey(spec provider.ProviderSpec, existingKey string) string {
+	p := ptermPrompter{}
+	if spec.EnvVar != "" {
+		if envVal := os.Getenv(spec.EnvVar); envVal != "" {
+			use, err := p.Confirm(
+				fmt.Sprintf("Use %s from the environment (%s)?", spec.EnvVar, logging.MaskSecret(envVal)), true)
+			if err == nil && use {
+				return envVal
+			}
+		}
+	}
+	if existingKey != "" {
+		keep, err := p.Confirm(
+			fmt.Sprintf("Keep the existing key (%s)?", logging.MaskSecret(existingKey)), true)
+		if err == nil && keep {
+			return existingKey
+		}
+	}
+	key, err := p.Secret(fmt.Sprintf("Enter your %s API key", spec.Label))
+	if err != nil {
+		return ""
+	}
+	return key
+}
+
+// reuseTierKey offers a credential already configured for another tier.
+func reuseTierKey(spec provider.ProviderSpec, tierName, key string) string {
+	reuse, err := ptermPrompter{}.Confirm(
+		fmt.Sprintf("Reuse the %s %s key (%s)?", tierName, spec.Label, logging.MaskSecret(key)), true)
+	if err != nil {
+		return ""
+	}
+	if reuse {
+		return key
+	}
+	return promptTierAPIKey(spec, "")
+}
+
+// promptEndpoint asks for a local provider's address and reports reachability.
+// A failure is a warning, not a refusal: the service may simply not be running
+// yet, and the user can still save the configuration.
+func promptEndpoint(spec provider.ProviderSpec, existing string) string {
+	def := existing
+	if def == "" {
+		if d, ok := llmprovider.DescriptorFor(spec.ID); ok {
+			def = d.DefaultBaseURL
+		}
+	}
+	apiURL, err := ptermPrompter{}.Input(fmt.Sprintf("%s endpoint", spec.Label), def)
+	if err != nil {
+		return def
+	}
+	apiURL = strings.TrimSpace(apiURL)
+	if apiURL == "" {
+		apiURL = def
+	}
+
+	pterm.Info.Printf("Validating connectivity to %s...\n", apiURL)
+	if err := llmprovider.ValidateOllamaURL(context.Background(), apiURL); err != nil {
+		pterm.Warning.Printf("Could not reach %s: %v\n", apiURL, err)
+		pterm.Info.Println("Continuing anyway — you can update the endpoint later.")
+	} else {
+		pterm.Success.Printf("Reachable at %s\n", apiURL)
+	}
+	return apiURL
 }
 
 func choiceToProvider(choice string) string {
@@ -598,126 +600,11 @@ func choiceToProvider(choice string) string {
 	}
 }
 
-func selectProviderForTier(tier provider.Tier) (provider.ProviderSpec, bool) {
-	specs := provider.ForTier(tier)
-	var options []string
-	for i, s := range specs {
-		options = append(options, fmt.Sprintf("%d) %s", i+1, s.Label))
-	}
-
-	choice, _ := pterm.DefaultInteractiveSelect.
-		WithDefaultText("Which LLM Provider would you like to use?").
-		WithOptions(options).
-		Show()
-
-	for i, s := range specs {
-		if strings.HasPrefix(choice, fmt.Sprintf("%d)", i+1)) {
-			return s, true
-		}
-	}
-	return provider.ProviderSpec{}, false
-}
-
-func resolveAPIKey(existingKey, providerID string, reader *bufio.Reader) string {
-	envVar := providerEnvVars[providerID]
-	envVal := ""
-	if envVar != "" {
-		envVal = os.Getenv(envVar)
-	}
-
-	hasEnv := envVal != ""
-	hasExisting := existingKey != ""
-
-	if hasEnv && hasExisting {
-		options := []string{
-			fmt.Sprintf("a) Use environment variable (%s)", envVar),
-			fmt.Sprintf("b) Keep existing config key (%s)", maskKey(existingKey)),
-			"c) Enter a new key",
-		}
-		choice, _ := pterm.DefaultInteractiveSelect.
-			WithDefaultText(fmt.Sprintf("API key sources available for %s", providerID)).
-			WithOptions(options).
-			Show()
-
-		if strings.HasPrefix(choice, "a)") {
-			pterm.Info.Println("Using environment key.")
-			return envVal
-		} else if strings.HasPrefix(choice, "b)") {
-			pterm.Info.Println("Keeping existing key.")
-			return existingKey
-		} else {
-			pterm.Print("Enter API key: ")
-			return readHiddenSecret(reader)
-		}
-	} else if hasEnv {
-		pterm.Success.Printf("Detected %s in environment.\n", envVar)
-		options := []string{"Use environment key", "Enter a different key"}
-		choice, _ := pterm.DefaultInteractiveSelect.WithOptions(options).Show()
-		if choice == "Enter a different key" {
-			pterm.Print("Enter API key: ")
-			return readHiddenSecret(reader)
-		}
-		return envVal
-	} else if hasExisting {
-		pterm.Info.Printf("Existing key found: %s\n", maskKey(existingKey))
-		options := []string{"Keep existing key", "Enter a new key"}
-		choice, _ := pterm.DefaultInteractiveSelect.WithOptions(options).Show()
-		if choice == "Enter a new key" {
-			pterm.Print("Enter API key: ")
-			return readHiddenSecret(reader)
-		}
-		return existingKey
-	}
-
-	pterm.Print(fmt.Sprintf("\nEnter your %s API Key: ", providerID))
-	return readHiddenSecret(reader)
-}
-
-func promptOllamaURL() string {
-	apiURL, _ := pterm.DefaultInteractiveTextInput.
-		WithDefaultText("Enter Ollama API URL").
-		WithDefaultValue("http://localhost:11434").
-		Show()
-	apiURL = strings.TrimSpace(apiURL)
-	if apiURL == "" {
-		apiURL = "http://localhost:11434"
-	}
-
-	pterm.Info.Println("Validating Ollama connectivity...")
-	if err := llmprovider.ValidateOllamaURL(context.Background(), apiURL); err != nil {
-		pterm.Warning.Printf("Could not reach Ollama at %s: %v\n", apiURL, err)
-		pterm.Info.Println("Continuing anyway — you can update the URL later.")
-	} else {
-		pterm.Success.Printf("Ollama reachable at %s\n", apiURL)
-	}
-	return apiURL
-}
-
-func selectModel(models []string) string {
-	options := append([]string{}, models...)
-	options = append(options, "Other (enter manually)")
-
-	result, _ := pterm.DefaultInteractiveSelect.
-		WithDefaultText("Select model").
-		WithOptions(options).
-		Show()
-
-	if result == "Other (enter manually)" {
-		custom, _ := pterm.DefaultInteractiveTextInput.WithDefaultText("Enter model name").Show()
-		return strings.TrimSpace(custom)
-	}
-	return result
-}
-
+// staticModelsForProvider returns the curated generative catalog for a provider.
+// It comes from mcplib now, so a model retired there — gemini-2.0-flash was
+// recommended here for months after it was shut down — cannot survive locally.
 func staticModelsForProvider(providerID string) []string {
-	spec, ok := provider.Get(providerID)
-	if !ok {
-		return nil
-	}
-	if fastModels, ok := spec.StaticModels[provider.TierFast]; ok {
-		return fastModels
-	}
-	return nil
+	return provider.GenerativeModels(providerID)
 }
 
 func promptInt(label string, current, defaultVal int) int {

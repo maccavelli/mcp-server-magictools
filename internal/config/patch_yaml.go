@@ -59,6 +59,7 @@ func applyPatchToAST(doc *yaml.Node, patch ConfigurationPatch) ([]string, error)
 		applyStringField(intelNode, "thinking_model", t.ThinkingModel, &changedPaths)
 		applyStringField(intelNode, "thinking_api_key", t.ThinkingAPIKey, &changedPaths)
 		applyStringField(intelNode, "thinking_api_key_env", t.ThinkingAPIKeyEnv, &changedPaths)
+		applyStringField(intelNode, "thinking_api_url", t.ThinkingAPIURL, &changedPaths)
 
 		// Embedding Engine
 		e := patch.Embedding
