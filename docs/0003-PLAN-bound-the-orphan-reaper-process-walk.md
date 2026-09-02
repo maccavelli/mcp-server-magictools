@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: complete
 date: 2026-09-02
 associated-madr: 0003-MADR-bound-the-orphan-reaper-process-walk.md
 decision-makers: MagicTools maintainers
@@ -154,4 +154,4 @@ Populate during execution.
 | Required tests | complete | (this commit) | 11 new tests: two cycle cases, self-loop, depth cap, three positive cases, unknown/zero/nil parent, and the one-enumeration-per-prune counter. All run under a 5s watchdog so an unbounded regression fails fast instead of hanging the suite | **I overwrote `process_reaper_test.go` instead of appending, destroying `TestLookupInternalRegistry`, `TestReportSubServerFailure` and `TestEnforceSingleInstanceSkipsSelf`. `make test` stayed green because deleted tests do not fail — coverage silently dropped. Restored from HEAD and verified byte-identical by md5 per function; the file diff is now insertions-only** |
 | Negative test of the cycle assertion | complete | (this commit) | An overlay replaced `process_reaper.go` with a copy carrying the pre-fix unbounded walk (same signature, no visited set, no cap). Against it, `TestParentWalkTerminatesOnCycle` and `...OnLongerCycle` fail with `isLegitimateDescendant did not terminate: the parent walk is unbounded`; against the fix all pass. The tree was never modified | the first `TestParentWalkDepthCap` passed against **both** implementations, so it discriminated nothing: its chain simply ran out. Rewritten so the chain reaches `myPid` only *beyond* the cap, making a capped walk answer false and an uncapped one true. It now fails against the unbounded walk — 3 failing assertions, not 2 |
 | Verification suite | complete | (this commit) | gofmt; per-file golint; `go vet`; `go test ./internal/client` (84 subtests); `go test -race`; `GOOS=windows build`; `make lint` 0 issues; `make test` | none |
-| Windows CI green | pending | | the criterion this change exists to satisfy; awaiting push | |
+| Windows CI green | complete | 94b4319 | Run 33693150736 on 94b4319: `Go (windows/amd64)` **success**, with linux/amd64 and darwin/arm64. The job that previously ran 600s to a timeout now completes normally. Compare run 33687818004 on the parent commit, which failed twice including on re-run | none |
