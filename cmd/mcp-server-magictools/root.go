@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -46,13 +45,12 @@ var rootCmd = &cobra.Command{
 	},
 }
 
-// Execute is undocumented but satisfies standard structural requirements.
-func Execute() {
+// Execute runs the command tree and returns its error. It no longer calls
+// os.Exit: exit mapping belongs to main through exitFunc, so `update --check`
+// can report an available update as exit 10 (MADR 0005).
+func Execute() error {
 	rootCmd.Version = Version
-	if err := rootCmd.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+	return rootCmd.Execute()
 }
 
 func init() {

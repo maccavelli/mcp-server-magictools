@@ -278,7 +278,8 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          TAG="${{ github.ref_name }}"
+          # The tag is not referenced here any more: the reusable workflow owns
+          # release creation, so this step only stages files.
           VER="${{ needs.go.outputs.version || github.sha }}"
           NAME="mcp-server-magictools"
 
@@ -302,41 +303,44 @@ jobs:
             exit 1
           }
 
-          ASSETS=()
-          for f in go-bin/"${NAME}"-*; do
-            b="$(basename "$f")"
-            case "$b" in
-              *.exe) out="${b%.exe}-${VER}.exe" ;;
-              *)     out="${b}-${VER}" ;;
-            esac
-            cp -f "$f" "$out"
-            ASSETS+=("$out")
-          done
+          # Stage the canonical release exactly as MADR 0005 defines it: the
+          # exact platform basenames the build job produced, one SHA256SUMS
+          # over them, and the installers as declared extras. Release-time
+          # version-suffixed copies and the second manifest are gone.
+          mkdir -p staging
+          cp -f go-bin/"${NAME}"-* staging/
+          rm -f staging/SHA256SUMS
+          cp -f go-bin/SHA256SUMS staging/SHA256SUMS
+          cp -f scripts/install.sh staging/install.sh
+          cp -f scripts/install.ps1 staging/install.ps1
 
-          SUMS="SHA256SUMS-${VER}"
-          sha256sum "${ASSETS[@]}" > "$SUMS"
-          ASSETS+=("$SUMS")
+          ls -lh staging/
+          cat staging/SHA256SUMS
 
-          for f in "${NAME}"-*-"${VER}"*; do
-            [ -f "$f" ] || continue
-            base="${f%%-"${VER}"*}"
-            ext="${f#*-"${VER}"}"
-            alias_name="${base}${ext}"
-            cp -f "$f" "$alias_name"
-            ASSETS+=("$alias_name")
-          done
-          cp -f "$SUMS" SHA256SUMS
-          ASSETS+=("SHA256SUMS")
+      - name: Upload the staged release
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: magictools-release-${{ github.ref_name }}
+          path: staging/
+          if-no-files-found: error
 
-          cp -f scripts/install.sh install.sh
-          ASSETS+=("install.sh")
-          cp -f scripts/install.ps1 install.ps1
-          ASSETS+=("install.ps1")
-
-          ls -lh "${ASSETS[@]}"
-          cat "$SUMS"
-
-          if ! gh release view "$TAG" >/dev/null 2>&1; then
-            gh release create "$TAG" --generate-notes --title "$TAG"
-          fi
-          gh release upload "$TAG" "${ASSETS[@]}" --clobber
+  # ---------------------------------------------------------------------------
+  # Publish through mcplib's reusable workflow: it validates the staged file set
+  # against the canonical contract, assembles a draft, attests it, publishes it
+  # once, and waits for immutability. It never uses --clobber.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: Publish self-update release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release]
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: maccavelli/mcplib/.github/workflows/publish-selfupdate-release.yml@3389f793e8fd6e697a3699fa8cb47dd50c2f951c # mcplib v1.4.0
+    with:
+      artifact-name: magictools-release-${{ github.ref_name }}
+      products-json: '["mcp-server-magictools"]'
+      platforms-json: '[{"os":"linux","arch":"amd64"},{"os":"darwin","arch":"arm64"},{"os":"windows","arch":"amd64"}]'
+      extra-assets-json: '["install.sh","install.ps1"]'
+      bridge-release: false

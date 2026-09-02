@@ -38,6 +38,7 @@ import (
 	"github.com/maccavelli/mcp-server-magictools/internal/util"
 	"github.com/maccavelli/mcp-server-magictools/internal/vector"
 	"github.com/maccavelli/mcplib"
+	"github.com/maccavelli/mcplib/selfupdate"
 )
 
 var (
@@ -179,7 +180,16 @@ func main() {
 	}
 
 	// 2. Execute Cobra
-	Execute()
+	if err := Execute(); err != nil {
+		// The library never exits the process. selfupdate.ExitCode returns 10
+		// when `update --check` found an actionable target and 1 for every
+		// other failure, so an available update is scriptable.
+		code := selfupdate.ExitCode(selfupdate.Result{}, err)
+		if code != 10 {
+			fmt.Fprintln(os.Stderr, err)
+		}
+		exitFunc(code)
+	}
 }
 
 // NewOrchestratorApp initializes a new OrchestratorApp, establishing the database, configuration, and logging lifecycle.

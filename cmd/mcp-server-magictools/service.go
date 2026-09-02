@@ -1242,6 +1242,9 @@ func init() {
 	serviceCmd.AddCommand(serviceRestartCmd)
 	serviceCmd.AddCommand(serviceLogsCmd)
 	serviceCmd.AddCommand(serviceDoctorCmd)
+	// Hidden operation the updater runs on the NEWLY installed binary; it
+	// rewrites only an existing definition and never installs one.
+	serviceCmd.AddCommand(newServiceRefreshCmd())
 
 	// Append the live list of subcommands to the top-level Short so the root
 	// help stays in sync with the registered children (no hand-maintained list).
@@ -1252,4 +1255,5 @@ func init() {
 	serviceCmd.Short = fmt.Sprintf("%s (%s)", serviceCmd.Short, strings.Join(names, ", "))
 
 	rootCmd.AddCommand(serviceCmd)
+	rootCmd.AddCommand(newUpdateCmd())
 }

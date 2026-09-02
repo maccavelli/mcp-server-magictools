@@ -165,6 +165,26 @@ check "pinned version installs" "$RC" 0
 run_installer "$LINUX" - "$WORK/bin-bad-version" --version nope --dry-run
 check "invalid version is rejected" "$RC" 1
 
+# --------------------------------------------------- canonical manifest shape
+# MADR 0005: SHA256SUMS lists the exact downloaded basename. This is the shape
+# every release from the next tag onward has.
+R="$WORK/rel-canonical"
+mk_release "$R" amd64
+printf '%s  %s-linux-amd64\n' "$(sha_of "$R/latest/download/$PRODUCT-linux-amd64")" "$PRODUCT" \
+    > "$R/latest/download/SHA256SUMS"
+D="$WORK/bin-canonical"
+run_installer "$LINUX" "$R" "$D"
+check "canonical manifest installs (exit 0)" "$RC" 0
+
+# Both shapes at once is ambiguous and must fail closed.
+R="$WORK/rel-ambiguous"
+mk_release "$R" amd64
+printf 'deadbeef  %s-linux-amd64\n' "$PRODUCT" >> "$R/latest/download/SHA256SUMS"
+D="$WORK/bin-ambiguous"; mkdir -p "$D"; printf 'PREEXISTING\n' > "$D/$PRODUCT"
+run_installer "$LINUX" "$R" "$D"
+check "ambiguous manifest exits 2" "$RC" 2
+check "  existing install untouched" "$(cat "$D/$PRODUCT")" "PREEXISTING"
+
 last=$(tail -n 1 "$INSTALLER")
 check "script ends with main \"\$@\"" "$last" 'main "$@"'
 
