@@ -17,22 +17,70 @@ import (
 	"github.com/maccavelli/mcp-server-magictools/internal/util"
 )
 
-func isLegitimateDescendant(pid int32, activePIDs map[int32]bool, myPid int32, myPpid int32) bool {
+// maxParentWalkDepth bounds the ancestry walk. Real chains are a handful of
+// levels deep; anything beyond this is a malformed process table, not a
+// legitimate descendant.
+const maxParentWalkDepth = 64
+
+// parentMap returns the whole process table as pid -> ppid in ONE enumeration.
+// It is a package variable so tests can supply a table without touching the OS.
+var parentMap = osParentMap
+
+// osParentMap enumerates the live process table exactly once.
+//
+// Taking the snapshot once is the point. Resolving a parent per step means one
+// full process-table snapshot per step on Windows, because gopsutil's Ppid goes
+// through CreateToolhelp32Snapshot and scans it linearly, and its parent cache
+// lives on the Process value rather than the package — so a freshly built
+// Process never hits it (MADR 0003 F1).
+func osParentMap() map[int32]int32 {
+	procs, err := process.Processes()
+	if err != nil {
+		return nil
+	}
+	parents := make(map[int32]int32, len(procs))
+	for _, p := range procs {
+		ppid, err := p.Ppid()
+		if err != nil {
+			continue
+		}
+		parents[p.Pid] = ppid
+	}
+	return parents
+}
+
+// isLegitimateDescendant reports whether pid's ancestry reaches this process,
+// its parent, or a process this registry is actively managing.
+//
+// It is a pure function over the supplied parent table: it performs no
+// syscalls, so it is exercisable on every platform, including the cycle case
+// that no Linux or macOS process table can produce.
+//
+// The walk terminates on every input. Windows recycles PIDs aggressively, so a
+// stale parent pointer can form a real A -> B -> A cycle; the previous
+// implementation detected only a self-loop and span forever on anything longer
+// (MADR 0003 F2).
+func isLegitimateDescendant(pid int32, parents map[int32]int32, activePIDs map[int32]bool, myPid int32, myPpid int32) bool {
+	visited := make(map[int32]bool, 8)
 	currPid := pid
-	for {
+	for depth := 0; depth < maxParentWalkDepth; depth++ {
 		if currPid == myPid || currPid == myPpid || activePIDs[currPid] {
 			return true
 		}
-		p, err := process.NewProcess(currPid)
-		if err != nil {
+		if visited[currPid] {
+			// A cycle in the parent chain. Not an ancestor of ours.
 			return false
 		}
-		ppid, err := p.Ppid()
-		if err != nil || ppid == 0 || ppid == currPid {
+		visited[currPid] = true
+
+		ppid, ok := parents[currPid]
+		if !ok || ppid == 0 || ppid == currPid {
 			return false
 		}
 		currPid = ppid
 	}
+	// Depth cap reached: treat as not a descendant rather than keep walking.
+	return false
 }
 
 // PruneOrphans scans running processes and kills any that were tagged by
@@ -43,6 +91,11 @@ func (m *WarmRegistry) PruneOrphans() {
 	if err != nil {
 		return
 	}
+
+	// One enumeration per prune. Classification is therefore against a
+	// point-in-time view: a process that reparents mid-prune is judged from
+	// this snapshot and picked up by the next sweep.
+	parents := parentMap()
 
 	m.mu.RLock()
 	activePIDs := make(map[int32]bool)
@@ -62,7 +115,7 @@ func (m *WarmRegistry) PruneOrphans() {
 			continue
 		}
 
-		if isLegitimateDescendant(pid, activePIDs, myPid, myPpid) {
+		if isLegitimateDescendant(pid, parents, activePIDs, myPid, myPpid) {
 			continue
 		}
 
