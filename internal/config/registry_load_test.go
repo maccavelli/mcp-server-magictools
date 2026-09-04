@@ -84,16 +84,24 @@ func TestUnparseableRegistryFailsTheLoadAndChangesNothing(t *testing.T) {
 
 // Acceptance 2.
 func TestUnreadableRegistryFailsTheLoadAndChangesNothing(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root ignores mode bits")
-	}
 	dir, v := writeRegistry(t, operatorRegistry)
 	path := filepath.Join(dir, ServersConfigFile)
 	before := hashOf(t, path)
 	if err := os.Chmod(path, 0o000); err != nil {
-		t.Skip("cannot deny reads here")
+		t.Skipf("cannot change mode here: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(path, 0o600) })
+
+	// Verify the precondition rather than assume it. os.Chmod returns nil on
+	// Windows but only sets the read-only attribute, and root ignores mode bits
+	// everywhere — both leave the file readable, and the test would then assert
+	// that an unreadable registry fails the load while handing it a readable
+	// one. A cross-platform `go vet` does not catch this: vet compiles, it does
+	// not run.
+	if _, err := os.ReadFile(path); err == nil {
+		t.Skip("this platform still reads a mode-000 file (Windows, or running as " +
+			"root), so the unreadable case cannot be created here")
+	}
 
 	_, err := LoadFromViper(v)
 	if err == nil {
