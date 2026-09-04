@@ -1100,60 +1100,34 @@ func LoadFromViper(v *viper.Viper) (*Config, error) {
 		}
 	}
 
+	// Loading configuration must not be able to destroy configuration.
+	//
+	// This block used to answer ANY load failure — including a YAML typo — by
+	// writing the shipped template over the file, and to log every one of them
+	// as "not found". That is how an operator's registry was repeatedly
+	// replaced (MADR 0004 F1). It also saved through the unqualified
+	// SaveManagedServers, which writes DefaultConfigDir() regardless of the
+	// path it had just read from, so a test or a second instance wrote the
+	// operator's real file (F2).
+	//
+	// Creating a registry is `init`'s job, where writing is the declared
+	// purpose and --force asks first.
 	managed, err := LoadManagedServersAt(serversPath)
-	if err != nil {
-		slog.Info("config: servers.yaml not found, generating defaults", "error", err)
-
-		if err := os.MkdirAll(filepath.Dir(serversPath), 0700); err != nil {
-			slog.Warn("config: failed to create config directory", "path", serversPath, "error", err)
-		}
-
-		if err := os.WriteFile(serversPath, []byte(defaultServersTemplate), 0600); err != nil {
-			slog.Warn("config: failed to write default servers.yaml", "error", err)
-		} else {
-			slog.Info("config: generated default servers.yaml")
-		}
-
-		managed, _ = LoadManagedServersAt(serversPath)
-
-		if data, err := os.ReadFile(ideConfigPath); err == nil {
-			var rawIDE IDEConfig
-			if err := json.Unmarshal(data, &rawIDE); err == nil {
-				migrationCount := 0
-				for name, entry := range rawIDE.McpServers {
-					if name == SelfName {
-						continue // strictly never migrate the magictools orchestrator
-					}
-
-					exists := false
-					for _, m := range managed {
-						if m.Name == name {
-							exists = true
-							break
-						}
-					}
-
-					if !exists {
-						managed = append(managed, ServerConfig{
-							Name:          name,
-							Command:       entry.Command,
-							Args:          entry.Args,
-							Env:           entry.Env,
-							DisabledTools: entry.DisabledTools,
-							Disabled:      false, // actively migrate them as enabled so they boot
-						})
-						migrationCount++
-					}
-				}
-				if migrationCount > 0 {
-					if saveErr := SaveManagedServers(managed); saveErr != nil {
-						slog.Warn("config: failed to write servers.yaml during IDE migration", "error", saveErr)
-					} else {
-						slog.Info("config: migrated IDE servers to servers.yaml", "count", migrationCount)
-					}
-				}
-			}
-		}
+	switch {
+	case err == nil:
+		// loaded
+	case errors.Is(err, ErrRegistryAbsent):
+		// The only outcome that legitimately means "no managed servers".
+		slog.Info("config: no servers.yaml yet; starting with no managed servers",
+			"path", serversPath,
+			"hint", "run `mcp-server-magictools init` to create one from the template")
+		managed = nil
+	default:
+		// Unreadable or unparseable: the operator's servers are still on disk.
+		// Fail the load rather than continue as though they had none — an empty
+		// registry and an unreadable one are indistinguishable downstream, and
+		// only one of them is safe to act on.
+		return nil, err
 	}
 
 	cfg := &Config{
@@ -1453,16 +1427,38 @@ func LoadManagedServers() ([]ServerConfig, error) {
 	return LoadManagedServersAt(filepath.Join(DefaultConfigDir(), ServersConfigFile))
 }
 
+// ErrRegistryAbsent means no servers.yaml exists yet. It is the only load
+// outcome a caller may treat as "there are no managed servers".
+//
+// The other two are not: an unreadable or unparseable registry means the
+// operator's servers are still on disk, and continuing as though they were not
+// is how a load came to replace them with the shipped template (MADR 0004 F1).
+var ErrRegistryAbsent = errors.New("servers.yaml does not exist")
+
+// ErrRegistryUnreadable means the file exists but could not be read.
+var ErrRegistryUnreadable = errors.New("servers.yaml could not be read")
+
+// ErrRegistryUnparseable means the file exists and was read but is not valid
+// YAML. The wrapped error carries the parser's line number.
+var ErrRegistryUnparseable = errors.New("servers.yaml could not be parsed")
+
 // LoadManagedServersAt reads the native server registry from the specified servers.yaml path.
+//
+// The three failure modes are distinct and must stay so. Collapsing them — and
+// labelling all of them "not found" — is what let a YAML typo be reported as a
+// missing file and answered by overwriting it.
 func LoadManagedServersAt(path string) ([]ServerConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("servers.yaml not found: %w", err)
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrRegistryAbsent, path)
+		}
+		return nil, fmt.Errorf("%w: %s: %w", ErrRegistryUnreadable, path, err)
 	}
 
 	var reg serversYAML
 	if err := yaml.Unmarshal(data, &reg); err != nil {
-		return nil, fmt.Errorf("servers.yaml parse error: %w", err)
+		return nil, fmt.Errorf("%w: %s: %w", ErrRegistryUnparseable, path, err)
 	}
 
 	servers := make([]ServerConfig, 0, len(reg.Servers))
@@ -1485,10 +1481,13 @@ func LoadManagedServersAt(path string) ([]ServerConfig, error) {
 	return servers, nil
 }
 
-// SaveManagedServers writes the native server registry to default servers.yaml.
-func SaveManagedServers(servers []ServerConfig) error {
-	return SaveManagedServersAt(filepath.Join(DefaultConfigDir(), ServersConfigFile), servers)
-}
+// There is deliberately no SaveManagedServers(servers) helper.
+//
+// It resolved its own path from DefaultConfigDir() while its only caller had
+// already resolved a different one, so a run against any non-default config
+// directory — a test, a second instance, a --config flag — wrote the operator's
+// real registry. Callers pass the path they resolved, or they do not write
+// (MADR 0004 F2).
 
 // SaveManagedServersAt writes the native server registry to the specified path,
 // preserving all existing YAML comments and structure.
@@ -1562,11 +1561,68 @@ func SaveManagedServersAt(path string, servers []ServerConfig) error {
 		return fmt.Errorf("failed to marshal servers.yaml: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
-		return fmt.Errorf("failed to write servers.yaml: %w", err)
+	if err := writeRegistryAtomically(path, data); err != nil {
+		return err
 	}
 
 	slog.Info("config: saved native server registry", "count", len(servers), "path", path)
+	return nil
+}
+
+// writeRegistryAtomically replaces the registry without ever leaving a partial
+// file on disk, keeping one generation of the previous contents.
+//
+// os.WriteFile truncates before it writes, so an interrupted write left a
+// half-file — which then failed to parse, which the load path used to answer by
+// overwriting it with the template. Both halves of that are fixed, and this is
+// the half that stops the damage being created in the first place.
+//
+// The .prev copy matches what service_refresh.go already does for a service
+// definition: "backup so a failed update can restore exactly what was there."
+// The registry is the more valuable file and had none. The operator has been
+// keeping these by hand since at least 2026-08-23 (MADR 0004 F3).
+func writeRegistryAtomically(path string, data []byte) error {
+	dir := filepath.Dir(path)
+
+	// Keep the previous contents. A registry that does not exist yet has
+	// nothing to preserve, which is not an error.
+	if current, err := os.ReadFile(path); err == nil {
+		if err := os.WriteFile(path+".prev", current, 0600); err != nil {
+			return fmt.Errorf("failed to back up servers.yaml before writing: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		// Refuse to overwrite a file we could not read: that is exactly the
+		// case where the existing contents matter most and are least known.
+		return fmt.Errorf("refusing to overwrite unreadable servers.yaml: %w", err)
+	}
+
+	// Same directory, so the rename is atomic rather than a cross-device copy.
+	tmp, err := os.CreateTemp(dir, ".servers.yaml-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp servers.yaml: %w", err)
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }() // no-op once renamed
+
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to write temp servers.yaml: %w", err)
+	}
+	// fsync before rename: a rename is atomic with respect to the directory,
+	// not with respect to the file's contents reaching the disk.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return fmt.Errorf("failed to sync temp servers.yaml: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close temp servers.yaml: %w", err)
+	}
+	if err := os.Chmod(tmpName, 0600); err != nil {
+		return fmt.Errorf("failed to chmod temp servers.yaml: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return fmt.Errorf("failed to replace servers.yaml: %w", err)
+	}
 	return nil
 }
 
