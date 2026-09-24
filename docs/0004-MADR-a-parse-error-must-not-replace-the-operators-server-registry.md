@@ -127,7 +127,7 @@ inside `t.TempDir()`, and its log contains:
 
 ```text
 config: saved native server registry count=13
-  path="/Users/saxsmith/Library/Application Support/mcp-server-magictools/servers.yaml"
+  path="/Users/<user>/Library/Application Support/mcp-server-magictools/servers.yaml"
 config: migrated IDE servers to servers.yaml count=1
 ```
 
