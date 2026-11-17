@@ -25,8 +25,12 @@ This tree holds three kinds of document:
 | 0004 | PLAN | [0004-PLAN-a-parse-error-must-not-replace-the-operators-server-registry.md](decisions/0004-PLAN-a-parse-error-must-not-replace-the-operators-server-registry.md) | implemented |
 | 0005 | MADR | [0005-MADR-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-MADR-make-execute-pipeline-schema-and-handler-agree.md) | accepted |
 | 0005 | PLAN | [0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md) | in-progress |
+| 0006 | MADR | [0006-MADR-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md](decisions/0006-MADR-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md) | accepted |
+| 0006 | PLAN | [0006-PLAN-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md](decisions/0006-PLAN-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md) | in-progress |
 | 0007 | MADR | [0007-MADR-install-the-fleet-agent-workspace.md](decisions/0007-MADR-install-the-fleet-agent-workspace.md) | accepted |
 | 0007 | PLAN | [0007-PLAN-install-the-fleet-agent-workspace.md](decisions/0007-PLAN-install-the-fleet-agent-workspace.md) | implemented |
+| 0008 | MADR | [0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md](decisions/0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md) | proposed |
+| 0008 | PLAN | [0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md](decisions/0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md) | proposed |
 
 ## I want to…
 
