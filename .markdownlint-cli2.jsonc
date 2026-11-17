@@ -1,0 +1,207 @@
+{
+  // markdownlint-cli2 configuration for the MagicTools MCP fleet READMEs.
+  // Optimized for human-readable technical documentation: tables, code
+  // blocks, inline code spans, fenced shell snippets, and selective inline
+  // HTML (e.g. <details>/<summary>, <br>, <kbd>) are all first-class.
+  //
+  // Two audiences, one run.
+  //   - Human documents (READMEs, guides, reports, AGENTS.md, harness
+  //     pointers) use the "config" block below.
+  //   - MADRs and PLANs (NNNN-MADR-*.md, NNNN-PLAN-*.md) are read and
+  //     executed by agents. They use the record profile in "overrides" at the
+  //     bottom, with combine "replace". That profile checks that the raw
+  //     source is unambiguous and that each kind's required sections exist,
+  //     not human style.
+  //
+  // The legacy override's "filter" is this file's ONE per-repository delta.
+  // Everything else is copied byte for byte from the workspace-scaffolding
+  // template. Decision: dotfiles docs/decisions/0004-MADR-agent-record-lint-profile.md.
+  //
+  // Rules that produce noise in long-form technical docs are disabled.
+  // Style rules are pinned so the docs lint clean across the whole fleet.
+  //
+  // Reference: https://github.com/DavidAnson/markdownlint/blob/main/doc/Rules.md
+
+  "config": {
+    // MD003 — Heading style. Pin to ATX (#) — used everywhere in the fleet.
+    "MD003": { "style": "atx" },
+
+    // MD004 — Unordered list style. Pin to dashes.
+    "MD004": { "style": "dash" },
+
+    // MD007 — Unordered list indent. 2 spaces matches the existing prose.
+    "MD007": { "indent": 2 },
+
+    // MD012 — Multiple consecutive blank lines. Keep on (catches real noise).
+    // MD013 — Line length. Allow 200 for prose; exempt tables, headings,
+    //         and code blocks (URLs, shell snippets, embedded JSON/YAML).
+    "MD013": {
+      "line_length": 200,
+      "tables": false,
+      "headings": false,
+      "code_blocks": false
+    },
+
+    // MD022 — Headings surrounded by blank lines. Keep on.
+    // MD023 — Heading must start at the beginning of the line. Keep on.
+    // MD024 — Multiple headings with the same content. Allow siblings
+    //         (e.g. ### Step 1: ... appears in multiple subdirs).
+    "MD024": { "siblings_only": true },
+
+    // MD025 — Single title. Allow multiple H1s in a single doc (some
+    //         READMEs have an org-name H1 + a project-name H1).
+    "MD025": { "front_matter_title": "" },
+
+    // MD026 — No trailing punctuation in headings. Allow "?" and ":"
+    //         (we use them in many section titles like "Why the Server Exists?").
+    "MD026": { "punctuation": ".,;!。，；：！" },
+
+    // MD029 — Ordered list item prefix. "ordered" permits 1./2./3. and
+    //         also 1./1./1. (re-numbers automatically).
+    "MD029": { "style": "ordered" },
+
+    // MD030 — Spaces after list markers. Pin to 1.
+    "MD030": { "ul_single": 1, "ol_single": 1, "ul_multi": 1, "ol_multi": 1 },
+
+    // MD033 — Inline HTML. Allow (we use <details>/<summary>, <br>, <kbd>,
+    //         <sub>, <sup>, etc. intentionally in tables and callouts).
+    "MD033": false,
+
+    // MD035 — Horizontal rule style. Pin to "---".
+    "MD035": { "style": "---" },
+
+    // MD036 — Emphasis used instead of a heading. Disabled — we often
+    //         use bold lead-ins (e.g. "**MANDATORY WORKFLOW:**") as
+    //         paragraph-level callouts rather than as headings.
+    "MD036": false,
+
+    // MD041 — First line in a file should be a top-level heading. Disabled
+    //         so the version-stamp blockquote and front matter are allowed.
+    "MD041": false,
+
+    // MD046 — Code block style. Pin to fenced.
+    "MD046": { "style": "fenced" },
+
+    // MD047 — File should end with a single newline. Keep on.
+    // MD048 — Code fence style. Pin to backticks.
+    "MD048": { "style": "backtick" },
+
+    // MD049 — Emphasis style. Pin to asterisks (matches all existing docs).
+    "MD049": { "style": "asterisk" },
+
+    // MD050 — Strong style. Pin to asterisks.
+    "MD050": { "style": "asterisk" },
+
+    // MD060 — Table column style. Disabled — overly pedantic when table
+    //         cells contain inline code spans (e.g. `json` | `markdown`).
+    "MD060": false
+  },
+
+  // Glob patterns.
+  //
+  // INCLUDE: all markdown files, records included (records get their own
+  // profile through "overrides" below, not an exclusion).
+  // EXCLUDE: build / dependency / VCS trees, vendored skills, `plans/`
+  // directories written by other tools, git-ignored paths ("gitignore"), and
+  // any directory whose name starts with `_`. check_records.py skips the same
+  // two sets, so both gates see one repository.
+  "gitignore": true,
+  "globs": [
+    "**/*.md",
+
+    // Build / dependency / VCS trees
+    "!**/node_modules/**",
+    "!**/vendor/**",
+    "!**/dist/**",
+    "!**/.git/**",
+    // pytest writes a README.md into its cache, so a lint run after the test
+    // suite would otherwise fail on a generated, gitignored file.
+    "!**/.pytest_cache/**",
+    // Agent skills vendored into a repository are byte copies of the fleet
+    // originals: they are linted (or not) where they are authored, not here.
+    "!**/.agents/skills/**",
+    "!**/.claude/skills/**",
+    "!**/internal/forks/**",
+
+    // Plans directories written by other tools: docs/plans/, Plans/, etc.
+    "!**/plans/**",
+    "!**/Plans/**",
+
+    // An underscore prefix marks a tree that is deprecated or moved elsewhere
+    // and kept as a fallback until it is deleted.
+    "!**/_*/**"
+  ],
+
+  // Record profile. The first override whose filter matches a file wins, and
+  // "replace" discards the human "config" block above for that file.
+  //
+  // Every record rule protects the raw source an agent reads:
+  //   - MD043: the kind's required sections exist, in order.
+  //   - MD029: source step numbers are sequential.
+  //   - MD040: a command is distinguishable from observed output.
+  //   - MD055/MD056: a table row says the same thing in source and rendered.
+  //   - MD025: one title.
+  //   - MD037-MD039: a literal in backticks, emphasis or link text is the literal.
+  //   - MD010: indentation inside commands is what it appears to be.
+  //   - The rest: headings parse as headings, anchors are unique, and links
+  //     and fences are well formed.
+  // Style rules (MD004, MD013, MD022, MD031, MD032, MD036, ...) stay off.
+  "overrides": [
+    {
+      // LEGACY: records that predate this profile. PER-REPOSITORY DELTA.
+      // List the record numbers that existed at adoption, e.g.
+      //   "**/00[0-4][0-9]-{MADR,PLAN}-*.md". Greenfield: leave it empty.
+      // Same profile minus MD043, MD040, MD029, MD038 and MD010.
+      "filter": ["**/000[1-6]-{MADR,PLAN}-*.md"],
+      "combine": "replace",
+      "config": {
+        "default": false,
+        "MD001": true, "MD003": { "style": "atx" }, "MD011": true,
+        "MD018": true, "MD019": true, "MD020": true, "MD021": true, "MD023": true,
+        "MD024": { "siblings_only": true }, "MD025": { "front_matter_title": "" },
+        "MD037": true, "MD039": true, "MD042": true,
+        "MD046": { "style": "fenced" }, "MD047": true, "MD048": { "style": "backtick" },
+        "MD051": true, "MD052": true, "MD053": true, "MD055": true, "MD056": true
+      }
+    },
+    {
+      // MADR: Context and Problem Statement, Decision Drivers, Considered
+      // Options, Decision Outcome, Consequences. All H2, in this order, with
+      // other headings allowed between and after them.
+      "filter": ["**/[0-9][0-9][0-9][0-9]-MADR-*.md"],
+      "combine": "replace",
+      "config": {
+        "default": false,
+        "MD001": true, "MD003": { "style": "atx" }, "MD010": true, "MD011": true,
+        "MD018": true, "MD019": true, "MD020": true, "MD021": true, "MD023": true,
+        "MD024": { "siblings_only": true }, "MD025": { "front_matter_title": "" },
+        "MD029": { "style": "ordered" }, "MD037": true, "MD038": true, "MD039": true,
+        "MD040": true, "MD042": true,
+        "MD043": { "headings": ["?", "*", "## Context and Problem Statement", "*",
+                                "## Decision Drivers", "*", "## Considered Options", "*",
+                                "## Decision Outcome", "*", "## Consequences", "*"] },
+        "MD046": { "style": "fenced" }, "MD047": true, "MD048": { "style": "backtick" },
+        "MD051": true, "MD052": true, "MD053": true, "MD055": true, "MD056": true
+      }
+    },
+    {
+      // PLAN: Grounding Reference, Prerequisites, at least one stage heading,
+      // Rollback, Completion Criteria. All H2, in this order.
+      "filter": ["**/[0-9][0-9][0-9][0-9]-PLAN-*.md"],
+      "combine": "replace",
+      "config": {
+        "default": false,
+        "MD001": true, "MD003": { "style": "atx" }, "MD010": true, "MD011": true,
+        "MD018": true, "MD019": true, "MD020": true, "MD021": true, "MD023": true,
+        "MD024": { "siblings_only": true }, "MD025": { "front_matter_title": "" },
+        "MD029": { "style": "ordered" }, "MD037": true, "MD038": true, "MD039": true,
+        "MD040": true, "MD042": true,
+        "MD043": { "headings": ["?", "*", "## Grounding Reference", "*",
+                                "## Prerequisites", "+", "## Rollback", "*",
+                                "## Completion Criteria", "*"] },
+        "MD046": { "style": "fenced" }, "MD047": true, "MD048": { "style": "backtick" },
+        "MD051": true, "MD052": true, "MD053": true, "MD055": true, "MD056": true
+      }
+    }
+  ]
+}

@@ -1,5 +1,5 @@
 ---
-status: complete
+status: implemented
 date: 2026-09-04
 associated-madr: "0004-MADR-a-parse-error-must-not-replace-the-operators-server-registry.md"
 ---

@@ -8,8 +8,6 @@ informed: MagicTools contributors and operators
 
 # Bound the orphan reaper's parent-process walk with one snapshot, a visited set, and a depth cap
 
-<!-- markdownlint-disable MD013 MD024 -->
-
 > Paired with [0003-PLAN-bound-the-orphan-reaper-process-walk.md](0003-PLAN-bound-the-orphan-reaper-process-walk.md).
 
 ## Context and Problem Statement

@@ -17,3 +17,7 @@ temp/
 bleve_index/
 test_index_synthetic/
 /mcp-server-magictools
+
+# Python (scripts/check_records.py)
+__pycache__/
+*.py[cod]

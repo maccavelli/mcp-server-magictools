@@ -11,7 +11,6 @@ kilocode (58072bd696) and grok-build (2bdd1d6a); go-llmprovider-sdk at b109cea (
 under More Information, run in a scratch copy of 368ac6a"
 informed: "gobble-cli (its 0060 record names this one as its Q5); the cross-repository coordinator"
 ---
-<!-- markdownlint-disable MD004 -->
 
 # Build continuation for execute_pipeline and make its contract, schema and sanitiser agree
 

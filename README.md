@@ -62,6 +62,7 @@ targets are Linux amd64, macOS arm64, and Windows amd64.
 
 | Goal | Start here |
 | :--- | :--- |
+| Read the decision index | [Documentation](docs/README.md) |
 | Install or upgrade the binary | [Platform installation](docs/guides/platform-installation.md) |
 | Complete a first working setup | [Getting started](docs/guides/getting-started.md) |
 | Connect an MCP client | [Client integration](docs/guides/client-integration.md) |
@@ -160,8 +161,9 @@ its own runtime requirements; for example, Go-aware mutation tools can require
 - [Operations and security](docs/guides/operations-and-security.md)
 - [Repository assessment](docs/guides/repository-assessment.md)
 
-The existing architectural decision and implementation-plan artifacts remain in
-[`docs/`](docs/).
+The existing architectural decision and implementation-plan artifacts are in
+[`docs/decisions/`](docs/decisions/). The index is
+[`docs/README.md`](docs/README.md).
 
 ## Current limitations
 

@@ -1,3 +1,24 @@
+# Recipes need bash (for pipefail) and grep, diff, cp and mv. On Windows
+# that is Git's bash, and Git's usr/bin goes on PATH because Git bash does
+# not put its coreutils there when make starts it from PowerShell. Set
+# GIT_BASH if Git is installed elsewhere. Every other host uses /bin/bash.
+ifeq ($(OS),Windows_NT)
+  GIT_BASH ?= C:/PROGRA~1/Git/usr/bin/bash.exe
+  SHELL := $(GIT_BASH)
+  export PATH := $(dir $(GIT_BASH)):$(PATH)
+else
+  SHELL := /bin/bash
+endif
+.SHELLFLAGS := -eu -o pipefail -c
+
+.PHONY: check-records markdownlint
+
+check-records:
+	python3 scripts/check_records.py --check-all
+
+markdownlint:
+	npx --yes markdownlint-cli2@0.23.2
+
 MOD_VERSION := 1.26.6
 BINARY_NAME=mcp-server-magictools
 DIST_DIR=dist

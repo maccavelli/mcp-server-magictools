@@ -1,5 +1,5 @@
 ---
-status: complete
+status: implemented
 date: 2026-09-02
 associated-madr: 0003-MADR-bound-the-orphan-reaper-process-walk.md
 decision-makers: MagicTools maintainers
@@ -8,8 +8,6 @@ decision-makers: MagicTools maintainers
 # Implement the bounded orphan-reaper process walk
 
 Associated MADR: [0003-MADR-bound-the-orphan-reaper-process-walk.md](0003-MADR-bound-the-orphan-reaper-process-walk.md)
-
-<!-- markdownlint-disable MD013 MD024 -->
 
 ## Goal
 
@@ -31,9 +29,11 @@ code in `cmd/`; anything in mcplib PLAN 0005 or 0006.
 
 Record before changing anything, and stop if it does not reproduce:
 
-    git rev-parse --short=12 HEAD
-    git status --short
-    go build ./... && go vet ./internal/client
+```bash
+git rev-parse --short=12 HEAD
+git status --short
+go build ./... && go vet ./internal/client
+```
 
 | Fact | Evidence |
 |---|---|
@@ -56,8 +56,10 @@ Record before changing anything, and stop if it does not reproduce:
 2. **Make the walk pure.** Change `isLegitimateDescendant` to take the parent
    map instead of querying the OS:
 
-       func isLegitimateDescendant(pid int32, parents map[int32]int32,
-           activePIDs map[int32]bool, myPid, myPpid int32) bool
+```go
+func isLegitimateDescendant(pid int32, parents map[int32]int32,
+    activePIDs map[int32]bool, myPid, myPpid int32) bool
+```
 
    It performs no syscalls, so it is testable on every platform.
 
@@ -100,18 +102,22 @@ Add to `internal/client/process_reaper_test.go`:
 
 Run, and record the output:
 
-    gofmt -l internal/client
-    golint internal/client/process_reaper.go internal/client/process_reaper_test.go
-    go vet ./internal/client
-    go test ./internal/client
-    go test -race ./internal/client
-    make lint
-    make test
+```bash
+gofmt -l internal/client
+golint internal/client/process_reaper.go internal/client/process_reaper_test.go
+go vet ./internal/client
+go test ./internal/client
+go test -race ./internal/client
+make lint
+make test
+```
 
 **Prove the instrument works.** The cycle test must fail against the current
 implementation before the fix lands. Demonstrate it without dirtying the tree:
 
-    go test -overlay=<overlay.json> -run TestParentWalk ./internal/client
+```bash
+go test -overlay=<overlay.json> -run TestParentWalk ./internal/client
+```
 
 where the overlay maps `process_reaper.go` to a scratch copy carrying the old
 unbounded walk. Record that it hangs or fails, and that it passes against the

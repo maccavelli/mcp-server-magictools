@@ -3,7 +3,6 @@ status: in-progress
 date: 2026-11-17
 associated-madr: "0005-MADR-make-execute-pipeline-schema-and-handler-agree.md"
 ---
-<!-- markdownlint-disable MD004 -->
 
 # Implement continuation for execute_pipeline and the contract, schema and sanitiser changes that go with it
 
