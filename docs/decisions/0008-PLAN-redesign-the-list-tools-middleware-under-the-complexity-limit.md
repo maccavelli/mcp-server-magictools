@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 date: 2026-11-17
 associated-madr: "0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md"
 ---
@@ -321,3 +321,40 @@ this plan does not do that, and a client's `tools/list` is unchanged by design (
    the vocabulary of `scripts/check_records.py`, whichever the repository's checker accepts when the work lands) with an
    execution record: what each phase did, each gate's output, every plant's failure, every deviation, and what was not
    done and why.
+
+## Execution Record
+
+### 2026-11-17, approval and the terms of commits
+
+* The owner accepted the MADR and approved this plan (the MADR's second Decided list, items 2 to 6): design E; fix only
+  the F3 data race and the stale comment here; all 23 characterisation tests as their own commit first; leave
+  `CallToolMiddleware` alone. This plan is `in-progress`.
+* **Addition, 2026-11-17, after an account change:** where this plan says the coordinator commits each phase (K7, P0
+  step 2, P6), from 2026-11-17 the owner makes the commits and the pushes themselves, from the coordinator's staged
+  list of files by path, until the owner says otherwise. No agent and not the coordinator commits or pushes. Nothing
+  above is rewritten; the gates that precede a commit (the pre-add checks and the disclosure guard) still run before
+  the owner commits.
+* The phases are executed in two hand-backs: P0 and P1, then P2 to P4 after P1 is committed by the owner.
+* Gates of this plan run on a `git archive` of the commit being built on plus the phase's own diff, never on the
+  working tree, which holds another record's uncommitted change (0006).
+
+### 2026-11-17, P1: the characterisation tests (tests only)
+
+* **What:** `internal/handler/list_tools_characterization_test.go` (rows L01 to L21, one function per row, and
+  `TestListToolsOverInMemorySession`, row E-1) and `internal/handler/list_tools_register_test.go`
+  (`TestListToolsThroughRegister`, row E-2). No production file changed. The F3 race test is not in this change: it
+  fails on the unchanged code, which is the defect, and goes with P2's lock.
+* **Seen passing on the unchanged code:** a `git archive` of `8f8cc99` plus the two files (the working tree was not
+  used): all 21 rows and both end-to-end tests pass. `internal/handler` is identical to `310a541`, the code the MADR
+  describes, apart from the two new files.
+* **Planted breaks of the current code:** 24, one at a time, each applied to a scratch copy of that archive; each
+  failed at least one named row, and every row failed under at least one plant. The first failing row and its test line
+  for each are kept with the evidence (scratch); P01 to P24 are the table in P1 step 3.
+* **Gates (run once each, in full, on the same archive plus the two files):** `gofmt -l` empty; `go vet` clean; whole
+  module `make lint` with golangci-lint v2.13.1 built with Go 1.26.6 (CI's current linter on the current pins):
+  `0 issues.`; with v2.15.0 built with Go 1.26.6 and with Go 1.27.4: exactly the two findings that exist at `310a541`
+  (gocognit at `list_tools_handler.go:19:1` and gocritic at `pipeline_tools.go:161:33`) and none in the new files;
+  `go test -race -count=20 -timeout 20m ./internal/handler/...` through the heavy-run queue: `ok`, exit 0, no data
+  race reported. The gate run was queued before a usage-limit stop and ran once, start to finish, after it; nothing
+  was cut short and nothing was re-run.
+* **Deviations:** none.

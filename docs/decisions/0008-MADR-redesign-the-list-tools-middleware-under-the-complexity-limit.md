@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-17
 decision-makers: repository owner
 consulted: "the owner's ruling of 2026-11-17, relayed by the cross-repository coordinator;
@@ -28,6 +28,39 @@ E4). The owner's rules rule out raising the limit.
    extracting the two loops into helpers inside the Go-pins record, and doing the extraction inside the 0005 plan.
    The redesign is decided in principle. How is this record's to work out, and the owner's where it is a real choice
    (Open questions).
+
+### Decided, second ruling (the owner, 2026-11-17, relayed by the coordinator; each label quoted only as a label)
+
+An addition of 2026-11-17: the record was `proposed` until now and this is the owner's answer to its four open
+questions and to how the work proceeds. Nothing above this heading changes; the Open questions under More Information
+stay as they were asked and are answered here.
+
+* **Q1, the design.** The label was "E: a small immutable type built once, one method per layer (Recommended)". As
+   put: design E, the layers type built at wiring and never written afterwards, with the layers as its methods.
+* **Q2, the defects.** The label was "Preserve behaviour; fix only the data race here; separate records for the rest
+   (Recommended)". As put: the redesign is a pure restructuring that the existing tests can verify, plus the read
+   lock for F3 (invisible to clients) and the stale comment (F8); F1, F2, F4 and F5 each get a follow-up record,
+   because fixing F1 changes what every stdio client sees. Those four records are named here as future work and are
+   not drafted in this record: one for the session-id lookup (F1), one for what a panic returns (F2), one for the
+   dropped cursor and metadata (F4), one for the unsanitised, reduced fallback (F5). F6, F9 and F10 stay as recorded.
+* **Q3, the tests.** The label was "All 23, as their own commit before the redesign (Recommended)". As put: the
+   characterisation rows L01 to L21, E-1 and E-2 land first as a tests-only commit, seen passing on the unchanged
+   code. The F3 race test is not among them: it fails on the unchanged code, which is the defect, so it lands with
+   the lock (PLAN, P2).
+* **Q4, `CallToolMiddleware`.** The label was "Leave it until it is next edited (Recommended)". As put: it stays at
+   exactly 50 and gets its own record when someone next edits it (F9).
+* **How it proceeds.** The label was "Approve the whole plan, committed and pushed as each phase passes
+   (Recommended)". As put: this record is marked accepted; each phase is committed and pushed to `main` on this
+   approval; then the 0006 change is committed as already approved; nothing is installed or restarted on the owner's
+   running server, and no tag is made. This is the owner's approval of the PLAN, and the authority for commits and
+   pushes to this repository's `main` for this plan only. **Superseded in part on 2026-11-17 by the owner, after an
+   account change:** no agent and not the coordinator commits or pushes anything until the owner says otherwise; work
+   is staged by path and the owner makes the commits and pushes from the coordinator's staged list.
+
+**Correction carried in, 2026-11-17.** 0006-MADR-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md
+(its F2) says the closure's `baseRes, err := next(...)` shadows the named result `err`. It does not: it assigns the
+named result (F7 above; the proof program and the plant on `err = nil` are in R4). This note is the only place the
+correction is made; 0006 is not edited by this record.
 
 ### Sequence
 
