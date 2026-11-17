@@ -739,3 +739,117 @@ form in Decided 2 and 3, and the continuation's design in Decided 8 to 13. Decid
 
 *
   [0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md](0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md)
+
+## Amendment 2026-11-17 (a): the Go toolchain lookup in `mcpGoBinary()` (Decided 15)
+
+Nothing above is rewritten or removed. This amendment adds one decision item, found while reading the file this plan
+already changes.
+
+### Decided (the owner, 2026-11-17, relayed by the coordinator)
+
+**Decided 15. The stale Go names go and the newest SDK wins.** The label was "Fix it in the 0005 plan: drop the
+stale names, prefer the newest SDK (Recommended)". The question put to the owner:
+`internal/handler/execute_pipeline.go:903-904` hard-codes two Go locations, `go1.26.5` and `go1.26.1` under the home
+directory's `sdk` folder, as fallbacks when looking for a toolchain; they are stale and, as put, never reached
+because a glob over `sdk/go*/bin/go` is tried first; but the glob is ordered as text, so with two SDKs installed
+side by side the wrong one can win. As put: added to 0005 by dated amendment; the two dead names go, the glob's
+result is ordered by version so the newest wins, and a test holds it.
+
+### What the code does today (verified at `368ac6a`; the first statement of the problem was partly wrong)
+
+`mcpGoBinary()` (E32) returns the Go binary used for the pipeline's build validation. Its candidate order:
+
+| Order | Candidate | Where |
+| :--- | :--- | :--- |
+| 1 | the `MCP_GO_BIN_PATH` environment variable, if non-empty, returned without checking the file | `internal/handler/execute_pipeline.go:898-900` |
+| 2 | every match of `<home>/sdk/go*/bin/go`, in the order `filepath.Glob` returns them | `:909-911` |
+| 3 | `<home>/sdk/go1.26.5/bin/go`, `<home>/sdk/go1.26.1/bin/go` | `:903-904` |
+| 4 | `<home>/.local/go/bin/go`, `<home>/go/bin/go`, `/usr/local/go/bin/go` | `:905-907` |
+| 5 | the bare name `go`, left to `PATH` | `:917` |
+
+The first candidate from 2 to 4 that is a regular file with an execute bit wins (`:912-916`). The glob's matches are
+placed before the fixed list, so the two stale names (3) are reached only when the glob finds no executable. That much
+of the first statement holds. What does not: **the glob returns names in ascending text order and the loop takes the
+first executable, so the lexically smallest directory wins, which is the oldest SDK whenever text order and version order
+disagree.** Measured (R10: a temporary home, fake executables, `mcpGoBinary()` called as it is):
+
+| SDKs installed side by side | Picked today | Newest? |
+| :--- | :--- | :--- |
+| `go1.26.11`, `go1.27.4` | `go1.26.11` | no |
+| `go1.26.1`, `go1.27.4` | `go1.26.1` | no |
+| `go1.1.3`, `go1.10.5` | `go1.1.3` | no |
+| `go1.26.9`, `go1.26.11` | `go1.26.11` | yes, by luck of the text order |
+| `go1.9.0`, `go1.27.4` | `go1.27.4` | yes, by luck of the text order |
+| `go1.27.4`, `go1.27rc1` | `go1.27.4` | yes, by luck of the text order |
+| none | `go` | not applicable |
+
+On the owner's Mac one SDK is installed, so nothing is wrong there today; the defect is latent.
+
+* **What calls it, and what the binary does.** Only `validateShadowBuffer`, twice (E33): a pre-check
+  `go build ./...` and the overlay build `go build -overlay … ./...` that validate staged mutations before any file is
+  written, in `executeMutatorAST` (`:544`). No other stage and no downstream tool uses it: the proxied servers have their
+  own environment (`MCP_GO_BIN_PATH` is also read by them, which is why the guides name it, E35). The Go version chosen
+  matters to the outcome: `go build` reads the target module's `go` line, and a toolchain older than it either switches
+  toolchain or fails; a failed validation aborts every staged mutation (the code fails closed). What the owner's
+  `GOTOOLCHAIN` setting would do was not run (not verified).
+* **Incidental, not decided here.** The pre-check at `:646` sets no working directory, so it builds the server's own
+  working directory rather than the target; only the overlay build at `:654` sets `cmd.Dir`. Noted for the owner; this
+  amendment does not change it.
+* **Testability.** `homeDirOrDot()` (E34) reads `os.UserHomeDir()`, which is `$HOME` on Unix and `USERPROFILE` on
+  Windows, so a test can redirect it only per operating system, and the fixed `/usr/local/go/bin/go` cannot be
+  redirected at all. The two existing calls only execute the function without asserting (E36). A seam is needed: a
+  function that takes the override, the home directory and the fixed fallbacks as arguments, called by `mcpGoBinary()`.
+* **Windows.** Not changed here, and measured only by reading: the loop requires an execute bit, which Windows files do
+  not report, and looks for `go` with no `.exe`, so on Windows the lookup always falls through to `go` on `PATH`
+  (E32). Not run on Windows (not verified). The templates already set `MCP_GO_BIN_PATH` to a `go.exe` path (E35).
+* **Documentation.** No guide describes the lookup order: `docs/guides/mcp-tools.md:82-83` and
+  `docs/guides/client-integration.md:100-102` say only to set `MCP_GO_BIN_PATH` (E35); the function's own comment says
+  "common SDK paths", which is stale.
+
+### Options
+
+* **N-a. Change nothing.** Good, because the owner has one SDK. Bad, because a second install makes the build
+  validation pick the oldest.
+* **N-b. Drop the two stale names only.** Good, because it removes dead code. Bad, because the ordering defect stays.
+* **N-c. Drop the stale names and order the glob by version, newest first.** **Decided.** Good, because both findings
+  are closed in one small function with a seam to test it.
+* **N-d. Drop the glob and the stale names; keep the override, the three fixed paths and `PATH`.** Good, because the
+  least code and no ordering rule. Bad, because it removes the only way a side-by-side SDK is found automatically.
+
+### The rule for "newest" (N-c)
+
+* A directory name parses when it is exactly `go` followed by `MAJOR.MINOR` or `MAJOR.MINOR.PATCH`, each a decimal
+  number with no sign and no leading `+`; a missing patch is `0`. Versions compare numerically, field by field, so
+  `go1.26.11` is newer than `go1.26.9` and `go1.27.4` is newer than `go1.26.11`.
+* Candidates are tried newest first. A directory whose `bin/go` is not an executable regular file is skipped and the
+  next newest is tried, as the loop does now.
+* Names that do not parse (`go1.27rc1`, `go1.27beta1`, `gotip`, `go-old`, anything else) rank below every name that
+  parses and are ordered among themselves by descending text, so the choice is deterministic and they stay reachable.
+  A release candidate is therefore never preferred over a release; to use one the owner sets `MCP_GO_BIN_PATH`.
+* Equal versions (`go1.27` and `go1.27.0`) tie; the tie is broken by ascending full path.
+* **What does not change:** `MCP_GO_BIN_PATH` still wins and is still returned unchecked; the other fallbacks keep their
+  order (`~/.local/go`, `~/go`, `/usr/local/go`) and come after the glob as now; the final fallback is still `go` on
+  `PATH`; the function's name and signature stay (it is unexported); nothing exported changes; Windows behaviour is the
+  same as today.
+
+### Evidence rows added
+
+| Id | Claim | Location | Mark |
+| :--- | :--- | :--- | :--- |
+| E32 | The function and its candidate order | `internal/handler/execute_pipeline.go:897`, `:898-900`, `:903-904`, `:905-907`, `:909-911`, `:912-916`, `:917` | read |
+| E33 | The only callers, and the stage that uses the binary | `internal/handler/execute_pipeline.go:646`, `:654`, `:602`, `:544` | read |
+| E34 | The home-directory lookup | `internal/handler/io_helpers.go:95-102` | read |
+| E35 | What the guides and templates say: only the environment variable | `docs/guides/mcp-tools.md:82-83`; `docs/guides/client-integration.md:100-102`; `internal/config/templates.go:534` | read |
+| E36 | The existing tests call the function without asserting | `internal/handler/execute_pipeline_extra_test.go:67-68`, `:90-91` | read |
+| R10 | What the lookup picks with several SDKs installed (table above) | `gobinary_today.txt`, scratch | run |
+
+### Question raised by this amendment
+
+* **Q-W. Windows.** The SDK lookup never matches on Windows today (above).
+  * **(a)** Leave it: Windows keeps finding `go` on `PATH` or `MCP_GO_BIN_PATH`. *Recommended:* the ruling is about
+    the stale names and the ordering, and a Windows lookup would be untested here. Cost: the lookup stays dead there.
+  * **(b)** Make it work: look for `go.exe` and do not require an execute bit on Windows. Cost: new behaviour on a
+    platform this plan cannot run, tested only by the repository's Windows CI job.
+  * **(c)** Remove the SDK glob on every platform (N-d). Cost: no automatic side-by-side lookup anywhere.
+
+The plan proceeds with (a) unless the owner answers otherwise.

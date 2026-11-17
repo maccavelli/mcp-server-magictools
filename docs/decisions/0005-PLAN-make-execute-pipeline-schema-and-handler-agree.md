@@ -369,3 +369,78 @@ mistyped argument that was ignored is refused (Decided 12). The owner is the onl
 corrected in the same commits as the code.
 
 **Rollback.** P9 step 7. The previous binary is the owner's copy from P9 step 1, because `make install` keeps none.
+
+## Amendment 2026-11-17 (a): the Go toolchain lookup (the MADR's Decided 15)
+
+Nothing above is rewritten or removed.
+
+**Which phase carries it: P4, as its first step and its own commit.** The function is at the end of
+`internal/handler/execute_pipeline.go` (`:895-918`). P4 changes the top of that file (the argument gate, `:35-57`), P5
+changes the dry-run path (`freshPipeline`, `:61-86`) and adds a new file, and P6 to P8 do not change it. The hunks are
+disjoint, but landing this one first, before P5's large change to the same file, means P5 is written against the final
+text and cannot conflict with it. It is also independent of every other P4 change, so it is committed on its own.
+(P7 would conflict least by file, since it does not touch `execute_pipeline.go`, but it would add a handler change to
+a sanitiser phase, and it would land after P5.) Price: mainstream, low.
+
+* **Tests first (P2, then red):** a new `internal/handler/go_binary_test.go` against the seam
+  `resolveGoBinary(override, home string, fallbacks []string) string`, with a temporary home holding fake executables
+  (skipped on Windows, where the lookup does not apply; see the MADR's amendment). Cases: the pairs that sort wrongly
+  as text, `go1.26.11` with `go1.27.4`, `go1.26.1` with `go1.27.4` and `go1.1.3` with `go1.10.5` (each must pick the newest;
+  today each picks the older, R10); the pairs that sort rightly by luck, `go1.26.9` with `go1.26.11` and `go1.9.0` with
+  `go1.27.4`; a release beside a release candidate (the release wins); names that do not parse (`gotip`, `go-old`,
+  `go1.27rc1`) alone (they are chosen, in descending text order) and beside a parsable one (the parsable one wins);
+  `go1.27` against `go1.27.0` (tie, ascending path); a newest directory whose `bin/go` is not executable (the next
+  newest wins); no SDK at all (the first executable fallback, then `go`); the override set (it wins, unchecked); the
+  two stale names are absent from the fallbacks `mcpGoBinary()` passes. Seen red against the unchanged tree.
+* **The change (P4.1):** `mcpGoBinary()` keeps its name and signature and calls
+  `resolveGoBinary(os.Getenv("MCP_GO_BIN_PATH"),
+  homeDirOrDot(), fixedGoFallbacks)`, where `fixedGoFallbacks` is the three fixed paths of the MADR's table in their
+  order; the glob result is parsed and sorted by the rule in the MADR; nothing exported changes.
+* **Docs, same commit:** the function's comment ("Priority: …") states the real order and the rule; one sentence is
+  added to `docs/guides/mcp-tools.md` after the one that names `MCP_GO_BIN_PATH` (`:82-83`), saying that without it the
+  newest `go*` directory under the home directory's `sdk` folder is used before the other fixed locations and `PATH`.
+  The existing two no-assertion calls in `execute_pipeline_extra_test.go` are left as they are.
+* **Planted break (P8):** restore the text ordering of the glob (return its matches in `filepath.Glob`'s order): the
+  `go1.26.11` with `go1.27.4` case fails; and make the parse accept `go1.27rc1` as `1.27.0`: the release-candidate case
+  fails.
+* **Gate:** the new tests green; `go vet`; `gofmt`; the package green. Commit and push (K8).
+
+## Sequencing note 2026-11-17 (the coordinator's, not the owner's)
+
+This repository now has two other records ahead of this plan's code phases, each touching different files:
+
+* a Go-pins record (`docs/0006-…`): the Go pins, a dependency bump, the CI lint tool moved to golangci-lint v2.15.0,
+  one fix in `internal/handler/pipeline_tools.go`, and the vendored fork's `go` line;
+* by the owner's ruling "A fuller redesign of the middleware under its own record", a redesign of `ListToolsMiddleware`
+  in `internal/handler/list_tools_handler.go`, a file the MADR cites as evidence (E11) and this plan does not change.
+
+This plan's code phases start after both have landed, so that each plan's gates see a tree no other plan is changing.
+**P2 begins by re-deriving every `path:line` the MADR and this plan rely on** (the citation script kept in the scratch
+folder, run against the tree as it then is), correcting any that moved by amendment, and every lint run in this plan uses
+golangci-lint v2.15.0, as CI will. A note for the other record: the 0006 record's pin sweep names
+`execute_pipeline.go` in its allowlist for the two stale Go names; after P4.1 removes them that allowlist entry no
+longer matters, and the coordinator may tell that record's author.
+
+**What this plan needs the middleware redesign to preserve** (found by reading `list_tools_handler.go` and what the MADR
+and tests rely on; the redesign is another record's, so this is a request, not a decision):
+
+1. **The inventory's schema reaches the wire unchanged in the base layer.** The registered tools come from the SDK's
+   own list (`addTool` sanitises each once, `handlers.go:219`); the redesign must not rewrite unions, `properties` or
+   branches of those tools: this plan's S2 schema and the emitted-bytes tests depend on it.
+2. **The fallback path emits the same schema.** When the base list fails the middleware builds tools straight from the
+   inventory without sanitising (`list_tools_handler.go:55-68`); the redesign must keep that output identical to the
+   base layer's for `execute_pipeline`, or this plan's `tools/list` test must cover both.
+3. **Proxied tools are sanitised exactly once, by `util.SanitizeToolSchema`, before they are listed.** Today that
+   happens when `align_tools` caches the tool (`align_tools_helpers.go:217`), and the middleware appends the cached
+   tools as they are (`list_tools_handler.go:82-95`). Wherever the redesign moves it, every proxied tool on the wire must
+   carry the sanitiser's output, and nothing else may add, retype or remove anything: this plan's sanitiser table
+   (the MADR's D3.1) and the D3.3 refresh test are held against that output.
+4. **A union or an empty `{}` that arrives from a downstream server is passed through byte for byte** (the MADR's
+   D3.4); the redesign must not normalise them.
+5. **The `tools/list` emission stays drivable in process.** This plan's test helper registers a handler as `main.go`
+   does (`Register`, `RegisterPipelineTools`, `RegisterPrompts`) and reads `tools/list` over the SDK's line-delimited
+   transport; if the redesign changes those entry points or the session-cache key the dynamic layer looks up (today an
+   empty string on stdio against the `active-session` the initialise handler stores, `main.go:398`), this plan's helper
+   follows it in P2.
+6. **No change to what the middleware does for `tools/call`** that this plan relies on: the continuation is an ordinary
+   `execute_pipeline` call and is not namespaced.
