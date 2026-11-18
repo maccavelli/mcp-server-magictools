@@ -1,6 +1,8 @@
 module github.com/maccavelli/mcp-server-magictools
 
-go 1.26.6
+go 1.26.11
+
+toolchain go1.27.4
 
 require (
 	github.com/Microsoft/go-winio v0.6.2
@@ -13,7 +15,7 @@ require (
 	github.com/goccy/go-json v0.10.6
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
-	github.com/klauspost/compress v1.18.6
+	github.com/klauspost/compress v1.20.2
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pterm/pterm v0.12.83
 	github.com/shirou/gopsutil/v4 v4.26.3

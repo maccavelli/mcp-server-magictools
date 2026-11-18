@@ -120,7 +120,7 @@ The stable artifact names are:
 
 ## Build current source
 
-Building requires the Go version declared by `go.mod` (currently Go 1.26.5):
+Building requires the Go version declared by `go.mod` (currently `go 1.26.11`, built and tested with Go 1.27.4):
 
 ```bash
 git clone https://github.com/maccavelli/mcp-server-magictools.git

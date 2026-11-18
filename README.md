@@ -143,10 +143,10 @@ loopback-only.
 | macOS arm64 | Native build, vet, test, and tag smoke | Yes |
 | Windows amd64 | Native build, vet, test, installer dry run, and tag smoke | Yes |
 
-Release binaries are cgo-free and do not require Go at runtime. Go 1.26.5 is
-required to build this repository. A managed server or pipeline tool may impose
-its own runtime requirements; for example, Go-aware mutation tools can require
-`MCP_GO_BIN_PATH`.
+Release binaries are cgo-free and do not require Go at runtime. Go 1.26.11 or
+later is required to build this repository (CI builds with Go 1.27.4). A
+managed server or pipeline tool may impose its own runtime requirements; for
+example, Go-aware mutation tools can require `MCP_GO_BIN_PATH`.
 
 ## Documentation library
 

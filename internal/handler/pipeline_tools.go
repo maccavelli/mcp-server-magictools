@@ -158,7 +158,7 @@ func topologicalSort(stages []PipelineStep, pipelineTools []*db.ToolRecord) ([]P
 		state[urn] = 1
 		for _, neighbor := range adj[urn] {
 			if dfs(neighbor) {
-				warnings = append(warnings, fmt.Sprintf("⚠️ Semantic Gatekeeper Warning: Circular Dependency Detected connecting `%s` natively.", neighbor))
+				warnings = append(warnings, fmt.Sprintf("⚠️ Semantic Gatekeeper Warning: Circular Dependency Detected connecting %#q natively.", neighbor))
 			}
 		}
 		state[urn] = 2

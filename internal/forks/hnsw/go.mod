@@ -1,6 +1,6 @@
 module github.com/coder/hnsw
 
-go 1.21.4
+go 1.26.11
 
 require (
 	github.com/natefinch/atomic v1.0.1
