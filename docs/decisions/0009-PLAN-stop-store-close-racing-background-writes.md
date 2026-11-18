@@ -1,6 +1,6 @@
 ---
-status: in-progress
-date: 2026-11-17
+status: implemented
+date: 2026-11-18
 associated-madr: "0009-MADR-stop-store-close-racing-background-writes.md"
 ---
 
@@ -544,6 +544,10 @@ exit status taken before any filter.
 - **Consequence.** The whole-module gate is owed. It is run after that record's fix lands. The earlier whole-module
   runs of this record (P6, 2026-11-18 02:52 to 03:36 UTC and again 04:49 to 05:45 UTC: 18 packages ok, only F8's
   `internal/telemetry` failing, 0 `DATA RACE`) predate the edits of 2026-11-18 below and do not meet the gate for them.
+  *Annotation, 2026-11-18:* met. After this entry was written, the owner confirmed (the label quoted only as a label:
+  "No live magictools server there: use it (Recommended)") that the fleet's Linux machine runs no live magictools
+  service, and the coordinator ran the gate there before committing. See the entry "2026-11-18, the commit, the owed
+  gate met, and the close-out" below.
 
 ### 2026-11-18, the review's findings and notes, staged, not committed
 
@@ -593,3 +597,43 @@ exit status taken before any filter.
 - Not run, by the owner's ruling: the whole module and `./internal/client/...`. Owed: the whole-module gate (the
   deviation above). Cross-builds were not among this pass's gates.
 - Staged by path, not committed: the same 15 paths.
+
+### 2026-11-18, the commit, the owed gate met, and the close-out
+
+- **The commit.** The coordinator committed and pushed the change as `94e1de4` ("fix(db): gate store writes and
+  background starts during Close") on `main`, after its own gate on a copy of the index. It holds the 15 staged paths
+  and nothing else: the two 0009 records, `docs/guides/services-and-transports.md`, `internal/db/badger.go`,
+  `cache.go`, `historical.go`, `io_helpers.go`, `metrics_flush_helpers.go`, the six `internal/db` test files of this
+  plan and `internal/handler/minify_close_refused_test.go` (15 files, 2260 insertions, 87 deletions).
+- **The owed whole-module gate, met (run by the coordinator, 2026-11-18, on the fleet's Linux machine).** From a copy of
+  the index (`3443524` plus the 15 staged paths, nothing else), through the fleet's `run-on-host --need linux --race`.
+  First a read-only listing: no process of the user carrying `MCP_ORCHESTRATOR_OWNED=true` and no process named
+  `mcp-server-magictools` ("no marked process and no magictools process on this host"). Then
+  `go test -race -count=1 -timeout 40m ./...` with a throwaway home: exit 0, 19 packages ok, no `DATA RACE`, no failure
+  (13:50 to 13:52 local time). The run used `-count=1`, not P6's `-count=3`: at more than one round the known F8
+  failures of `internal/telemetry` appear, and the earlier `-count=3` runs of this change showed only those. On the
+  development machine, on the same copy: `go test -race -count=20 -timeout 30m ./internal/db/...` exit 0 and
+  `./internal/handler/...` exit 0, both with no `DATA RACE`; `go vet` of both packages exit 0.
+- **The race-gate count.** On the change the whole-package handler race gate is green in every run since the
+  amendment: 16 as last recorded (P6 twice, 10; the reviewer 3; the coordinator 3), plus the review pass of 2026-11-18
+  once and the coordinator once more: 18 runs, 18 green, 0 red.
+
+**The completion criteria, one by one.**
+
+| Criterion | Met | Evidence |
+| :--- | :--- | :--- |
+| 1. Every phase done, or skipped by the ruling on Q1 (P3) | yes | P0, P1: entries of 2026-11-17; P2: "P2: the gate", the third and fourth rulings' entries; P3: skipped (annotation under P3); P4: "P4: planted breaks" and the later plant runs; P5: "P5: docs" and the docs bullets of later entries; P6: "P6", "P6 again", the review pass's gates, and the whole-module gate above; P7: the independent review (MADR, "Independent review and the decisions after it"); P8: staged and handed over, committed as `94e1de4` |
+| 2. T1 to T6 in the tree; T1 to T5 red on `5e8821e`; T6 red under its plant; every plant seen failing its tests | yes | T1 to T5: "P1"; T6: P4 table ("the bound ignored"); the plants: the P4 table, the fourth ruling's table, and the review pass's 28 plants, all seen failing; the one that survives without `-race` (`bgWg.Add` split from `countStart`) was seen failing under `-race` |
+| 3. P6.3 passed 5 of 5; the module-wide run clean or each finding named | yes | the handler race gate: 18 of 18 (above); the module-wide run: clean on the Linux machine (above); the earlier `-count=3` runs: F8 only, named |
+| 4. The independent review's findings closed | yes | S1, S2: the entry "the review's findings and notes"; F10: the coordinator's decision; F11: the owner's ruling, accepted here, to the raw-handle follow-up; the third survivor informational (MADR, the review section); the change with these answers committed after the coordinator's gate |
+| 5. The docs step done; the record check and markdownlint pass | yes | P5 and the docs bullets of later entries; `check_records` and markdownlint exit 0 after this entry |
+| 6. Staged for the owner; the MADR `accepted`; this plan `implemented` only after the commit of the finished change | yes | staged by path in each pass; the MADR's status is `accepted`; committed as `94e1de4` under the commit rule as restored on 2026-11-17 (Conventions annotation) |
+
+All six are met, so this plan's status becomes `implemented`, the word criterion 6 names and the record check's PLAN
+vocabulary holds (a scratch run with `complete` fails that check: "'complete' is not a PLAN status").
+
+Not criteria of this plan, recorded for whoever reads on: CI on `94e1de4` (the coordinator watches it); the 0008
+redesign's gate re-run, which belongs to
+[0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md](0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md).
+The follow-ups named in the MADR: the raw-handle writers (F3, with F11's wipe-versus-close panic) and the telemetry
+second-round failures (F8).

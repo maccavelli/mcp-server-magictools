@@ -245,6 +245,8 @@ The other plan's agent reported the following; they were claims until checked.
   (10 of 10), the independent reviewer of this change 3, the coordinator 3. Against: red twice (the 0008 author), and on
   the base green 5 of 5 (the investigator) and 6 of 6 (the 0008 reviewer). The rate is still not established; the
   decision does not rest on it.
+  *A further line, 2026-11-18 (later):* since the amendment, the handler race gate on the change has been green in
+  every run: 18 runs, 18 green (the 16 above, the review pass once, the coordinator once more).
 
 ### Evidence index
 
@@ -596,6 +598,9 @@ defect in the packages that have tests.
    is fixed under its own record (the owner's ruling, under "Independent review and the decisions after it"); it is run
    after that fix lands. The earlier whole-module runs (P6, 2026-11-18 02:52-03:36 and 04:49-05:45 UTC) predate the
    edits of 2026-11-18.
+   *Annotation, 2026-11-18 (later):* met. The coordinator ran the gate on 2026-11-18 on the fleet's Linux machine, which
+   runs no live magictools service (the owner's confirmation), from a copy of the index: `go test -race -count=1
+   -timeout 40m ./...`, exit 0, 19 packages ok, no data race (PLAN, the close-out entry of 2026-11-18).
 6. `make lint` under golangci-lint v2.13.1 and v2.15.0, `go vet`, `gofmt`, per-file `golint`, `make check-records`,
    `make markdownlint`.
 7. An independent review of the diff before it is staged (the change alters shutdown).
