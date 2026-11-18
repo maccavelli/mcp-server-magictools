@@ -31,6 +31,8 @@ This tree holds three kinds of document:
 | 0007 | PLAN | [0007-PLAN-install-the-fleet-agent-workspace.md](decisions/0007-PLAN-install-the-fleet-agent-workspace.md) | implemented |
 | 0008 | MADR | [0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md](decisions/0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md) | accepted |
 | 0008 | PLAN | [0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md](decisions/0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md) | in-progress |
+| 0009 | MADR | [0009-MADR-stop-store-close-racing-background-writes.md](decisions/0009-MADR-stop-store-close-racing-background-writes.md) | accepted |
+| 0009 | PLAN | [0009-PLAN-stop-store-close-racing-background-writes.md](decisions/0009-PLAN-stop-store-close-racing-background-writes.md) | in-progress |
 
 ## I want to…
 
