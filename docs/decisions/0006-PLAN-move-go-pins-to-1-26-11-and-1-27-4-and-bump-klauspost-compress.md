@@ -227,6 +227,141 @@ complexity 52 of func (*OrchestratorHandler).ListToolsMiddleware is high
 | `govulncheck ./...` under `go1.26.11`, `GOPROXY=off` | 15:06:17 | 15:06:23 | 0 | "No vulnerabilities found." |
 | cross-builds linux, windows (amd64), darwin (arm64), `CGO_ENABLED=0` | 15:06:23 | 15:06:31 | 0 each | |
 
+### 2026-11-18, re-verified on `1fe5ce7` and made ready to commit
+
+**Why.** The change was built on 2026-11-17 on base `310a541` and waited for records 0008 and 0009 (the sequencing
+note above). Both have landed: 0008's characterization tests `5e8821e` and redesign `1fe5ce7`; 0009's change `94e1de4`
+and close-out `bfcd269`. This entry records what was re-checked on `1fe5ce7`, the base of every run below. While it
+was written HEAD moved to `5ac1030`, whose only change is the status line of the 0008 PLAN
+(`git diff --name-only 1fe5ce7 5ac1030` names that one file); no code, workflow or nine-file input changed, so no run
+was repeated for it. The nine change files were not edited by this entry.
+
+**How.** Every run was on a scratch copy: `git archive HEAD` plus exactly the nine change files (`.github/workflows/ci.yml`,
+`Makefile`, `README.md`, `docs/guides/platform-installation.md`, `go.mod`, `go.sum`, `internal/forks/hnsw/go.mod`,
+`internal/handler/pipeline_tools.go`, `internal/handler/pipeline_tools_cycle_test.go`), never the working tree, which
+also holds another record's uncommitted build (0010). Throwaway `HOME` and `XDG_*`, the real Go caches,
+`GOPROXY=off`. The scratch copies of the nine were byte-identical to the working-tree files.
+
+**The new restriction.** While `0010-PLAN-make-tests-unable-to-signal-real-processes.md` is open, the session machine
+(which runs the owner's live service) runs no whole-module test, no `internal/client` or `internal/proctable` test
+and no built binary of this module. It ran `internal/handler`, `internal/db` and `cmd` tests, build, vet, lint and
+`govulncheck`. The whole-module runs went to the Linux machine (confirmed by the owner on 2026-11-18 to have no live
+magictools service): `run-on-host --need linux`, from a scratch copy, with a script that lists processes carrying
+the orchestrator's marker and refuses to test if any exists, and refuses if pid 999999 is alive.
+
+**What moved under the change.**
+
+- Between `310a541` and `1fe5ce7` none of the nine files changed except `Makefile` and `README.md`, which the commit
+  `9de984f` (agent rules, record checks, lint config) touched; the working-tree diffs of all nine against `1fe5ce7` are
+  exactly the lines this plan lists. Lines moved: `MOD_VERSION` is now `Makefile:22` (was 1), the README statement
+  `README.md:146-147` (was 145), `go.mod` has `go` at 3, `toolchain` at 5 and `klauspost/compress` at 18. Unmoved:
+  `ci.yml:89`, `platform-installation.md:123`, `pipeline_tools.go:161`.
+- Records 0008 and 0009 changed `internal/handler/list_tools_handler.go`, `handlers.go`, handler and `internal/db`
+  files and tests and one guide: none of the nine.
+- CI's workflow: `git log` for `.github/workflows/ci.yml` ends at `a3358a5`, an ancestor of `310a541`; no step was
+  added since. The change is still the one lint-pin line. `actionlint` exit 0 on the modified workflow.
+- Lint, v2.15.0 (built with `go1.27.4`): `1fe5ce7` without this change reports exactly one finding,
+  `internal/handler/pipeline_tools.go:161:33` `sprintfQuotedString`, exit 2, at the same place as before. With the
+  change, `make lint` is clean on the whole module: "0 issues.", exit 0, under `go1.27.4` and under
+  `GOTOOLCHAIN=go1.26.11`. Of the two findings the MADR names (F1, F2): F1 is fixed here; F2 was removed by the
+  redesign of record 0008 (`1fe5ce7`).
+- Lint, CI's current pin v2.13.1 built with `go1.27.4`, on the changed tree under `go1.27.4`: exit 2, "1 issues:
+  typecheck: 1", `internal/ui/init_test.go:3:8: could not import testing (.../go1.27.4/src/testing/allocs.go:8:2:
+  could not import runtime (... could not import internal/goarch (-: could not load export data: internal error in
+  importing "internal/goarch" (cannot decode "internal/goarch", export data version 5 is greater than maximum supported
+  version 4); please report an issue))))`. That is why the pin moves with the toolchain.
+- A v2.15.0 built with Go 1.26 cannot lint this tree at all (exit 2, "the Go language version (go1.26) used to build
+  golangci-lint is lower than the targeted Go version (1.27.4)"), so the floor lint run used the `go1.27.4`-built
+  binary under `GOTOOLCHAIN=go1.26.11`, as CI would build it.
+
+**Gates on `1fe5ce7` plus the nine** (session machine unless marked; exit statuses taken before any filter; times
+are local, 2026-11-18):
+
+| Gate | Toolchain | Start | End | Exit | Result |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| version-agreement check, then the lint-pin and fork-floor part | n/a | 15:29:17 | 15:29:18 | 0, 0 | "0 failure(s)", "0 lint-pin failure(s)" |
+| `gofmt -l cmd internal` | `go1.27.4` | 15:30:12 | 15:30:13 | 0 | nothing listed |
+| `go mod tidy -diff` | `go1.27.4` | 15:30:14 | 15:30:14 | 0 | nothing moves |
+| `go mod verify` | `go1.27.4` | 15:30:15 | 15:30:23 | 0 | "all modules verified" |
+| `go build ./...` | `go1.27.4` | 15:30:24 | 15:30:31 | 0 | |
+| `go vet ./...` | `go1.27.4` | 15:30:32 | 15:30:33 | 0 | |
+| `govulncheck ./...` | `go1.27.4` | 15:30:33 | 15:30:39 | 0 | "No vulnerabilities found."; affected by 0 |
+| fork: `go mod tidy -diff` | `go1.27.4` | 15:30:39 | 15:30:39 | 0 | |
+| `go mod tidy -diff` | `go1.26.11` | 15:30:39 | 15:30:39 | 0 | |
+| `go mod verify` | `go1.26.11` | 15:30:39 | 15:30:41 | 0 | "all modules verified" |
+| `go build ./...` | `go1.26.11` | 15:30:41 | 15:30:44 | 0 | `go version` prints `go1.26.11` |
+| `go vet ./...` | `go1.26.11` | 15:30:44 | 15:30:45 | 0 | |
+| `govulncheck ./...` | `go1.26.11` | 15:30:45 | 15:30:51 | 0 | "No vulnerabilities found."; affected by 0 |
+| fork: `go mod tidy -diff` | `go1.26.11` | 15:30:51 | 15:30:51 | 0 | |
+| `go build` and `go vet`, `CGO_ENABLED=0`, linux/amd64 | `go1.27.4` | 15:30:51 | 15:30:59 | 0, 0 | |
+| the same, windows/amd64 | `go1.27.4` | 15:30:59 | 15:31:08 | 0, 0 | |
+| the same, darwin/arm64 | `go1.27.4` | 15:31:08 | 15:31:13 | 0, 0 | |
+| `go test -count=1 -timeout 20m` of `./internal/handler/...`, `./internal/db/...`, `./cmd/...`, fork `./...` | `go1.27.4` | 15:31:13 | 15:31:46 | 0 each | every package `ok` |
+| the same four | `go1.26.11` | 15:31:46 | 15:32:21 | 0 each | every package `ok` |
+| `make lint`, v2.15.0 | `go1.27.4` | 15:27:00 | 15:27:52 | 0 | "0 issues." |
+| `make lint`, v2.15.0 | `go1.26.11` | 15:27:53 | 15:28:43 | 0 | "0 issues." |
+| `make lint`, v2.15.0, `1fe5ce7` without the change | `go1.27.4` | 15:28:45 | 15:29:40 | 2 | one finding, `pipeline_tools.go:161:33` |
+| `make lint`, v2.13.1, the changed tree | `go1.27.4` | 15:29:40 | 15:29:47 | 2 | `typecheck`, text above |
+| `govulncheck ./...`, `1fe5ce7` without the change (baseline V1) | `go1.27.4`, `go1.26.11` | 15:31:59, 15:32:04 | 15:32:04, 15:32:09 | 3, 3 | GO-2026-6865 at `klauspost/compress@v1.18.6`, fixed in v1.20.2 |
+| Whole module, the Linux machine (`uname -sm`: "Linux x86_64"): `go test -race -count=1 -timeout 40m ./...` | `go1.27.4` | 17:02:29 | 17:04:07 | 0 | every package `ok` (19; `internal/prompt_registry` has no test files) |
+| The same, floor | `go1.26.11` | 17:22:43 | 17:27:11 | 0 | every package `ok`; `go version` prints `go1.26.11 linux/amd64` |
+| Extra: the same without `-race`, floor, a WSL distro of the owner's laptop (see below) | `go1.26.11` | 17:04:32 | 17:05:14 | 0 | every package `ok` |
+
+`govulncheck` v1.9.0, database 2026-11-11 02:51 UTC (unchanged from the first run). With `-show verbose` the changed
+tree still lists one imported-package finding (`go.opentelemetry.io/otel@v1.43.0`) and fifteen required-module
+findings (`golang.org/x/net@v0.54.0`, `golang.org/x/text@v0.39.0`) that the code does not call: exit 0, "affected by 0".
+They are not this record's and are not fixed here.
+
+**The Linux runs.** Each began with the read-only listing and printed, before any test: "no marked process and no
+magictools process on this host" and "pid 999999 is not alive" (permission-denied lines for other users' `/proc`
+entries are expected and were ignored; only this user's processes can carry the marker). `internal/client` is in the
+whole-module run and passed on both toolchains. The first run of this table was queued behind another agent's job
+when the session was stopped by the owner's usage limit; it had started no test, was cancelled by `run-heavy
+--cancel`, and is not counted. All rows above were run again from the start. Note on the extra row: the floor run
+without `-race` was routed by the dispatcher to a WSL distro of the owner's laptop, not to the Linux machine. The
+distro was stopped when the turn began (so no live service ran in it) and its listing found no marked process; it is
+recorded as an extra, and the floor run on the Linux machine under `-race` in the row above is the one this entry
+relies on.
+
+**Planted failures (scratch copies of the changed tree; each seen failing, then the tree passing).**
+
+- Version agreement, `check_versions.py` (kept in the coordinator's scratch, not in the tree; the first builder's script,
+  unchanged): `toolchain go1.27.3`: exit 1, README and platform guide "missing ... Go 1.27.3"; `go 1.26.10`: exit 1,
+  `Makefile: missing 'MOD_VERSION := 1.26.10'` and the README and guide lines; the platform guide saying `go 1.26.5`:
+  exit 1, "stray version docs/guides/platform-installation.md:123".
+- Lint pin and fork floor, `check_lint_pin.py`: `ci.yml` at `@v2.13.1`: exit 1, ".github/workflows/ci.yml:89: lint pin
+  v2.13.1, want v2.15.0"; the fork at `go 1.26.6`: exit 1, "internal/forks/hnsw/go.mod: go 1.26.6, want root floor go 1.26.11".
+- The warning test, `TestTopologicalSortCycleWarning`, with `pipeline_tools.go` reverted to `1fe5ce7` (15:30:55 to
+  15:31:01): exit 1, the backquote case FAIL, got "connecting `srv:be`ta` natively." want "connecting "srv:be`ta"
+  natively."; with the fix (15:31:01 to 15:31:03): exit 0, both cases PASS.
+
+**Records checks.** On a scratch copy of `1fe5ce7` with the nine files and these two edited records: `python3 scripts/check_records.py
+--check-all` exit 0, "seen failing" (exit 1, "broken relative link") on a planted link to a missing record;
+`markdownlint-cli2` v0.23.2, the version `make markdownlint` pins, over 44 files: "0 issues in 0 files", seen failing
+(MD018) on a planted `#bad heading`; `actionlint .github/workflows/ci.yml` exit 0. A scan of the additions for the
+local account name, hostnames and machine paths found none. The global disclosure guard runs over the outgoing commits
+before a push, not here.
+
+**Completion criteria**, one by one:
+
+| Criterion | Evidence | State |
+| :--- | :--- | :--- |
+| Goal 1: `go.mod` says `go 1.26.11` and `toolchain go1.27.4`; every current statement agrees | the diff; the agreement check passes on the tree and fails on three planted copies (this entry) | met in the tree; not yet committed |
+| Goal 2: `klauspost/compress` is `v1.20.2`; `govulncheck ./...` exits 0 under both toolchains | the gate table above; baseline V1 reproduced at exit 3 | met in the tree; not yet committed |
+| Goal 3: no tag, release, install or restart; the plan stops at the tree | nothing was tagged, installed or restarted; no commit by this entry | met |
+| V1: baseline exit 3 under both toolchains | gate table, `1fe5ce7` without the change | met |
+| V2: agreement exit 0 on the tree; exit 1 on a wrong toolchain, a wrong floor, a stray old pin | planted failures above | met |
+| V3: `govulncheck` exit 0 under both; build, vet and tests at 1.27.4 and 1.26.11; cross-builds; `gofmt`; `markdownlint` | gate table; whole-module tests on the Linux machine (rows above); markdownlint under Records checks | met (Linux rows green, both toolchains) |
+| MADR Confirmation, after: `govulncheck`, `go mod tidy -diff`, build, vet, tests at both toolchains, cross-builds | the same | met |
+| MADR Confirmation, agreement and lint-pin parts, including planted failures | planted failures above | met |
+| MADR Confirmation, lint: no type-check error under both toolchains; the owner decides findings | `make lint` v2.15.0 is "0 issues." under both; F1 fixed (D4), F2 removed by record 0008 | met |
+| The sequencing condition (D6): the redesign has landed before this change is pushed | `1fe5ce7` is in HEAD | met |
+| Committed, and CI's run observed (every job on `go1.27.4`; lint step with v2.15.0 green) | not possible before the commit and a push | waits for the commit and CI |
+| A floor job in CI | not part of this change (MADR open question 1) | not in scope |
+
+Status stays `in-progress`: the commit of the nine change files and of these records, and one CI run of the pushed
+commit, remain. Those are the criteria marked "not yet committed" and "waits for the commit and CI".
+
 ## Deviations
 
 - 2026-11-17: CI's linter pin v2.13.1 cannot type-check Go 1.27.4 (MADR E10).
@@ -236,3 +371,5 @@ complexity 52 of func (*OrchestratorHandler).ListToolsMiddleware is high
   until the owner rules, and this plan does not hide them. Resolved
   2026-11-17: F1 fixed (D4); F2 is the redesign record's (D6), and this
   change waits for it (sequencing note above).
+  Resolved further 2026-11-18: F2 was removed by record 0008's redesign (`1fe5ce7`); `make lint` under v2.15.0 is
+  clean with this change (entry of that date). No other deviation.

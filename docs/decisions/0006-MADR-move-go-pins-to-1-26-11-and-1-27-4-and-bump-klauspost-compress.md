@@ -386,3 +386,33 @@ None is amended.
 
 - [GO-2026-6865](https://pkg.go.dev/vuln/GO-2026-6865).
 - [actions/setup-go at v7.0.0](https://github.com/actions/setup-go/blob/b7ad1dad31e06c5925ef5d2fc7ad053ef454303e/README.md).
+
+### 2026-11-18, additions after 0008 and 0009 landed
+
+Dated additions only; nothing above is rewritten. The change waited, uncommitted, for the records
+0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md and
+0009-MADR-stop-store-close-racing-background-writes.md, as D6 required. Both have landed (verified at `1fe5ce7`; HEAD is now
+`5ac1030`, which changes only the 0008 PLAN). The PLAN's entry of this date records how the change was re-verified.
+
+- **The owner's standardisation ruling, 2026-11-18,** relayed by the coordinator, quoted exactly and only as a ruling:
+  "standardize on golangci-lint v2.15.0". It confirms the pin that D3 already moves in this record (`ci.yml:89`).
+- **The two findings of v2.15.0 (F1, F2), outcome.** F1 is fixed here (D4): at `1fe5ce7` without this change, v2.15.0
+  reports exactly one finding, `internal/handler/pipeline_tools.go:161:33` (`sprintfQuotedString`); with this change
+  `make lint` under v2.15.0 reports "0 issues." under `go1.27.4` and under `go1.26.11`. F2 was removed by the
+  redesign of record 0008, in commit `1fe5ce7`; it is not fixed, suppressed or excluded by this record. The sequencing
+  condition in Consequences ("this change cannot be pushed until F2's redesign has landed") is therefore met.
+- **Correction (F2 text above).** F2 says the closure's `baseRes, err := next(...)` "shadows the named result `err`". It
+  does not: in the function body's own block the short variable declaration assigns the named result. Record 0008
+  carries the proof and the note (finding F7 in
+  0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md); the sentence above stays as history.
+- **Where the whole-module gates ran.** On a machine that runs the owner's live magictools service, whole-module test
+  runs, `internal/client` tests and a built binary of this module are not run (the interim rule of
+  `0010-PLAN-make-tests-unable-to-signal-real-processes.md`, in the root `CLAUDE.md` while that plan is open). So the
+  whole-module `go test` of this change ran only on the Linux machine, which the owner confirmed on 2026-11-18 has no
+  live magictools service, from a scratch copy, after a read-only listing of processes carrying the orchestrator's
+  marker and a refusal if pid 999999 is alive. On the session machine only `internal/handler`, `internal/db` and
+  `cmd` were tested, plus build, vet, lint and `govulncheck`. The PLAN's entry of this date holds the results.
+- **CI floor job.** None is added by this change; the open question 1 above (E3) stands unchanged.
+- **Not verified, additions.** That CI's lint step is green on GitHub's runners with v2.15.0 and `go1.27.4` (nothing is
+  pushed); the compress bump is covered by `internal/util/compress_test.go` on the Linux run, and this record defines no
+  separate read-back check.
