@@ -19,11 +19,13 @@ func viewOrWarn(db *badger.DB, fn func(txn *badger.Txn) error) {
 	}
 }
 
-func updateOrWarn(db *badger.DB, fn func(txn *badger.Txn) error) {
-	if db == nil {
+// updateOrWarn runs fn as one admitted write (see Store.update) and logs a failure at warn level,
+// including the ErrStoreClosing refusal a write gets once Close has begun.
+func (s *Store) updateOrWarn(fn func(txn *badger.Txn) error) {
+	if s == nil || s.DB == nil {
 		return
 	}
-	if err := db.Update(fn); err != nil {
+	if err := s.update(fn); err != nil {
 		slog.Warn("db: update failed", "error", err)
 	}
 }

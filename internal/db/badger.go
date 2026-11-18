@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -59,16 +60,24 @@ type Store struct {
 	PendingHydrations atomic.Int64 // 🛡️ DIRTY FLAG: Tracks pending hydration count for optimistic skip
 	toolsCount        atomic.Int64
 	intelCount        atomic.Int64
-	SynergySuccess    sync.Map           // Tracks RRF synergy strengths
-	SynergyPenalty    sync.Map           // Tracks RRF synergy rejections
-	synergyMu         sync.Mutex         // Protects synergy counter decay
-	metricsBuf        sync.Map           // 🛡️ BATCHING: Accumulates ToolMetrics to prevent LSM write contention
-	SearchGates       SearchGateConfig   // Per-leg confidence floors (synced from orchestrator config)
-	Fusion            FusionConfig       // Score-fusion + ranking-boost weights (synced from orchestrator config)
-	closing           chan struct{}      // 🛡️ LIFECYCLE: Signaled on Close() to abort background goroutines
-	bgWg              sync.WaitGroup     // 🛡️ LIFECYCLE: Blocks Close() until background goroutines halt
-	ctx               context.Context    // 🛡️ LIFECYCLE: Unified context for DB operations
-	cancel            context.CancelFunc // 🛡️ LIFECYCLE: Triggers ctx.Done() during Close()
+	SynergySuccess    sync.Map               // Tracks RRF synergy strengths
+	SynergyPenalty    sync.Map               // Tracks RRF synergy rejections
+	synergyMu         sync.Mutex             // Protects synergy counter decay
+	metricsBuf        sync.Map               // 🛡️ BATCHING: Accumulates ToolMetrics to prevent LSM write contention
+	SearchGates       SearchGateConfig       // Per-leg confidence floors (synced from orchestrator config)
+	Fusion            FusionConfig           // Score-fusion + ranking-boost weights (synced from orchestrator config)
+	closing           chan struct{}          // 🛡️ LIFECYCLE: Signaled on Close() to abort background goroutines
+	bgWg              sync.WaitGroup         // 🛡️ LIFECYCLE: Blocks Close() until background goroutines halt
+	gate              writeGate              // admits every write; Close refuses new ones and waits, bounded, for admitted ones
+	drainWait         time.Duration          // how long Close waits for admitted writes; 0 means storeDrainTimeout
+	closeOnce         sync.Once              // Close tears down once; a later or concurrent Close waits and gets the same result
+	closeErr          error                  // the result of that one teardown
+	refusalLogged     atomic.Bool            // the first background start refused while closing has been logged
+	startHook         atomic.Pointer[func()] // tests only: runs in countStart, just after bgWg.Add, inside the admission
+	runHook           atomic.Pointer[func()] // tests only: runs first on each goroutine goBackground starts
+	txnStartHook      atomic.Pointer[func()] // tests only: runs at the start of each transaction function of UpdateWithRetryCtx
+	ctx               context.Context        // 🛡️ LIFECYCLE: Unified context for DB operations
+	cancel            context.CancelFunc     // 🛡️ LIFECYCLE: Triggers ctx.Done() during Close()
 }
 
 // ToolMetrics stores dynamic intent reliability scoring for search rescoring
@@ -231,10 +240,9 @@ func (s *Store) RecordSynergy(hash string, success bool) {
 	// 🛡️ LIFECYCLE: Register async disk flush with bgWg so Close() waits for completion.
 	// Without this, Store.Close() can close the badger DB while this goroutine is
 	// mid-transaction, causing "send on closed channel" panics during test teardown.
-	s.bgWg.Add(1)
-	go func(sK, pK []byte, sV, pV int64, updateBoth bool, isSuccess bool) {
-		defer s.bgWg.Done()
-
+	// goBackground refuses the start once Close has begun (the flush is then dropped).
+	sK, pK, sV, pV, updateBoth, isSuccess := succKey, penKey, newSucc, newPen, decayTriggered, success
+	s.goBackground("synergy flush", func() {
 		// Abort if the store is shutting down — the DB may already be closed.
 		select {
 		case <-s.closing:
@@ -242,7 +250,7 @@ func (s *Store) RecordSynergy(hash string, success bool) {
 		default:
 		}
 
-		err := s.DB.Update(func(txn *badger.Txn) error {
+		err := s.update(func(txn *badger.Txn) error {
 			if updateBoth {
 				if err := txn.Set(sK, []byte(strconv.FormatInt(sV, 10))); err != nil {
 					return err
@@ -257,7 +265,7 @@ func (s *Store) RecordSynergy(hash string, success bool) {
 		if err != nil {
 			slog.Error("database: failed to persist RRF synergy weight", "hash", hash, "error", err)
 		}
-	}(succKey, penKey, newSucc, newPen, decayTriggered, success)
+	})
 	s.updateGlobalLearningWeight()
 }
 
@@ -362,12 +370,14 @@ func (s *Store) evictSynergyWeightsBeyondCap(maxKeys int) int {
 	}
 	s.synergyMu.Unlock()
 
-	wb := s.DB.NewWriteBatch()
-	for _, e := range evict {
-		wbDeleteOrWarn(wb, []byte("synergy:success:"+e.hash))
-		wbDeleteOrWarn(wb, []byte("synergy:penalty:"+e.hash))
-	}
-	if err := wb.Flush(); err != nil {
+	if err := s.write(func() error {
+		wb := s.DB.NewWriteBatch()
+		for _, e := range evict {
+			wbDeleteOrWarn(wb, []byte("synergy:success:"+e.hash))
+			wbDeleteOrWarn(wb, []byte("synergy:penalty:"+e.hash))
+		}
+		return wb.Flush()
+	}); err != nil {
 		slog.Warn("database: failed to flush synergy weight prune", "error", err)
 	}
 
@@ -554,8 +564,225 @@ func NewStore(path string, limitOpts ...int) (*Store, error) {
 	return s, nil
 }
 
-// Close closes the database and index
+// ErrStoreClosing is the error a write gets when the store will not run it because Close has begun.
+//
+// A write that starts after Close has begun is refused with ErrStoreClosing before it touches the
+// database. A write that was admitted before Close began, was still running when Close's wait ran out
+// (storeDrainTimeout), and then met the closed database with a panic raised inside the database library,
+// returns an error that wraps ErrStoreClosing and carries the panic's text (see Store.write); such a
+// write that meets the closed database without a panic gets the library's own error instead. Callers
+// test for it with errors.Is, log it and carry on: it is a shutdown refusal, not a fault, and the data
+// it refused (a cache entry, a counter, a trace) is lost.
+var ErrStoreClosing = errors.New("store closing")
+
+// storeDrainTimeout bounds how long Close waits for the writes it had already admitted.
+const storeDrainTimeout = 5 * time.Second
+
+// badgerPanicPrefix is the function-name prefix of every frame inside the database library.
+const badgerPanicPrefix = "github.com/dgraph-io/badger/v4"
+
+// writeGate admits writes to the store, and lets Close refuse later ones and wait for admitted ones.
+//
+// Admission is a counter under a mutex, not a lock held across the write: a write admitted while other
+// admitted writes run, including one admitted inside another (nesting), only increments the counter, so
+// it can never wait on Close, and Close can wait with a deadline. Once shut, every admission is refused
+// with ErrStoreClosing. The zero value is an open gate.
+type writeGate struct {
+	mu       sync.Mutex
+	closed   bool
+	n        int           // admitted writes that have not ended
+	idle     chan struct{} // closed when the gate is shut and n reaches 0
+	timedOut atomic.Bool   // set when Close's wait ran out with admitted writes still running
+}
+
+// enter admits one write, or refuses it with ErrStoreClosing once the gate is shut.
+func (g *writeGate) enter() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.closed {
+		return ErrStoreClosing
+	}
+	g.n++
+	return nil
+}
+
+// leave ends one admitted write.
+func (g *writeGate) leave() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.n--
+	if g.closed && g.n == 0 && g.idle != nil {
+		close(g.idle)
+		g.idle = nil
+	}
+}
+
+// shut refuses every later admission and returns a channel that is closed once no admitted write remains.
+func (g *writeGate) shut() <-chan struct{} {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.closed = true
+	idle := make(chan struct{})
+	if g.n == 0 {
+		close(idle)
+	} else {
+		g.idle = idle
+	}
+	return idle
+}
+
+// await waits up to d for idle. It returns 0 when every admitted write ended in time; otherwise it
+// records that the wait ran out (timedOut) and returns how many admitted writes are still running.
+func (g *writeGate) await(idle <-chan struct{}, d time.Duration) int {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-idle:
+		return 0
+	case <-t.C:
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.n == 0 {
+		return 0
+	}
+	g.timedOut.Store(true)
+	return g.n
+}
+
+// write runs fn as one admitted write. It returns ErrStoreClosing without calling fn once Close has
+// begun; otherwise Close waits (bounded) until fn has returned. Every write to s.DB in this package goes
+// through write (directly, or through update or UpdateWithRetryCtx); reads do not.
+//
+// write also holds the one recovery in this package, and it is narrow. A write still running when Close's
+// wait ran out may meet the closed database, and the library then panics: txn.NewIterator panics with
+// badger.ErrDBClosed on a closed database, and a commit that passed the library's blockWrites check just
+// before Close can send on the closed write channel. Such a panic becomes an error wrapping
+// ErrStoreClosing, with the panic's text, and one logged warning, only when all of these hold: Close's
+// wait ran out (timedOut), the database is closed, and the panic was raised inside the library
+// (lateLibraryPanic). Any other panic is not recovered at all, so it propagates with its own value and
+// stack. A write that blocks for ever inside the library after Close is not a panic: its goroutine stays
+// blocked until the process exits, and Close has already returned.
+func (s *Store) write(fn func() error) (err error) {
+	if gerr := s.gate.enter(); gerr != nil {
+		return gerr
+	}
+	defer func() {
+		defer s.gate.leave()
+		if !s.lateLibraryPanic() {
+			return
+		}
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%w: a write outlived the close wait and met the closed database: %v", ErrStoreClosing, r)
+			slog.Warn("database: a write outlived the close wait; the closed database's panic became a store-closing error",
+				"panic", fmt.Sprint(r))
+		}
+	}()
+	return fn()
+}
+
+// update runs fn in one Badger read-write transaction, as one admitted write (see write).
+func (s *Store) update(fn func(txn *badger.Txn) error) error {
+	return s.write(func() error { return s.DB.Update(fn) })
+}
+
+// goBackground starts fn on a goroutine counted in bgWg, unless Close has begun: then fn never runs, the
+// first refusal is logged once (info level, naming the work).
+//
+// The closed check and bgWg.Add happen under the gate's mutex, the mutex Close takes to shut the gate before
+// it reaches bgWg.Wait. So every Add happens before the gate is shut, and therefore before that Wait; a start
+// that comes after cannot Add. These goroutines are not admitted writes: they are not counted in the drain,
+// and Close waits for them through bgWg, without the drain bound, as before; their own writes go through
+// the gate like any other.
+func (s *Store) goBackground(work string, fn func()) {
+	s.gate.mu.Lock()
+	if s.gate.closed {
+		s.gate.mu.Unlock()
+		if s.refusalLogged.CompareAndSwap(false, true) {
+			slog.Info("database: background work not started: the store is closing", "work", work)
+		}
+		return
+	}
+	s.countStart()
+	s.gate.mu.Unlock()
+	go func() {
+		defer s.bgWg.Done()
+		if h := s.runHook.Load(); h != nil {
+			(*h)()
+		}
+		fn()
+	}()
+}
+
+// countStart counts one background start in bgWg; goBackground calls it while holding the gate's mutex. The
+// test hook runs here, after the Add and with the call, so a test can check that the mutex is held whenever a
+// start is counted.
+func (s *Store) countStart() {
+	s.bgWg.Add(1)
+	if h := s.startHook.Load(); h != nil {
+		(*h)()
+	}
+}
+
+// lateLibraryPanic reports, from write's deferred function, whether a panic is unwinding that write may
+// turn into ErrStoreClosing: Close's wait ran out, the database is closed, and the panic was raised inside
+// the database library. It does not stop the panic.
+func (s *Store) lateLibraryPanic() bool {
+	if !s.gate.timedOut.Load() || s.DB == nil || !s.DB.IsClosed() {
+		return false
+	}
+	fn, ok := panicOrigin(2)
+	return ok && (strings.HasPrefix(fn, badgerPanicPrefix+".") || strings.HasPrefix(fn, badgerPanicPrefix+"/"))
+}
+
+// panicOrigin returns the function that raised the panic now unwinding through the caller's frames, skipping
+// skip frames first (as runtime.Callers does); ok is false when no panic is unwinding.
+func panicOrigin(skip int) (fn string, ok bool) {
+	pcs := make([]uintptr, 64)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(skip, pcs)])
+	inPanic := false
+	for {
+		f, more := frames.Next()
+		switch {
+		case f.Function == "runtime.gopanic":
+			inPanic = true
+		case inPanic && !strings.HasPrefix(f.Function, "runtime."):
+			return f.Function, true
+		}
+		if !more {
+			return "", false
+		}
+	}
+}
+
+// Close shuts the store down. In order: it refuses every later write with ErrStoreClosing; it waits up to
+// storeDrainTimeout (five seconds) for the writes it had already admitted; if any is still running then,
+// it logs a warning naming how many and goes on (such a write may then meet the closed database, see
+// Store.write); it stops the store's own goroutines, removes the PID file, releases the lock, and closes the
+// search index and Badger. It returns Badger's close error, if any: a wait that ran out is the warning,
+// not an error.
+//
+// Close is idempotent and safe for concurrent use: the teardown runs once, and a later or concurrent call
+// waits for it to finish and returns the same result. If the teardown panics (a wipe running at the same
+// moment can make the search index's close panic: MADR F11), the once is spent: the panic reaches the first
+// caller, and a later call returns nil while Badger stays open. Reads are not gated: a read during or after
+// Close gets what Badger gives it, as before.
 func (s *Store) Close() error {
+	s.closeOnce.Do(func() { s.closeErr = s.shutdown() })
+	return s.closeErr
+}
+
+// shutdown is Close's one teardown.
+func (s *Store) shutdown() error {
+	wait := s.drainWait
+	if wait <= 0 {
+		wait = storeDrainTimeout
+	}
+	if n := s.gate.await(s.gate.shut(), wait); n > 0 {
+		slog.Warn("database: writes still in flight when the close wait ran out; closing anyway",
+			"in_flight", n, "wait", wait)
+	}
+
 	// 🛡️ LIFECYCLE: Signal background goroutines to abort before closing DB.
 	close(s.closing)
 	if s.cancel != nil {
@@ -589,7 +816,9 @@ func (s *Store) UpdateWithRetryCtx(ctx context.Context, fn func(txn *badger.Txn)
 
 	var err error
 	for range maxRetries {
-		err = s.DB.Update(fn)
+		// One admission per attempt: a backoff sleep never holds Close, and a refusal (ErrStoreClosing)
+		// is not a conflict, so it is returned at once, not retried.
+		err = s.update(s.withTxnStartHook(fn))
 		if err == nil {
 			return nil
 		}
@@ -610,31 +839,26 @@ func (s *Store) UpdateWithRetryCtx(ctx context.Context, fn func(txn *badger.Txn)
 	return fmt.Errorf("transaction conflict after %d retries: %w", maxRetries, err)
 }
 
+// withTxnStartHook returns fn, or, when a test has set txnStartHook, fn preceded by the hook.
+func (s *Store) withTxnStartHook(fn func(txn *badger.Txn) error) func(txn *badger.Txn) error {
+	h := s.txnStartHook.Load()
+	if h == nil {
+		return fn
+	}
+	return func(txn *badger.Txn) error {
+		(*h)()
+		return fn(txn)
+	}
+}
+
 // UpdateWithRetry wraps badger.Update with exponential backoff for Transaction Conflicts.
 // For cancellation support, use UpdateWithRetryCtx.
 func (s *Store) UpdateWithRetry(fn func(txn *badger.Txn) error) error {
 	return s.UpdateWithRetryCtx(context.Background(), fn)
 }
 
-// BatchSaveTools saves multiple tools and their schemas. Writes go through a Badger
-// WriteBatch (BDG-2), which flushes internally as it fills, so a large server sync
-// can never exceed the single-transaction size limit (ErrTxnTooBig) the way the old
-// one-shot Update did. The new-tool count uses a cheap read pass beforehand.
-func (s *Store) BatchSaveTools(records []*ToolRecord, schemas map[string]map[string]any) error {
-	// Pre-pass: count which tool URNs are new (for the in-memory counter only).
-	var totalNewTools int64
-	if len(records) > 0 {
-		viewOrWarn(s.DB, func(txn *badger.Txn) error {
-			for _, record := range records {
-				if _, gErr := txn.Get([]byte("tool:" + record.URN)); errors.Is(gErr, badger.ErrKeyNotFound) {
-					totalNewTools++
-				}
-			}
-			return nil
-		})
-	}
-
-	wb := s.DB.NewWriteBatch()
+// writeToolBatch writes the schemas, then the tool records and their category index, into wb and flushes it.
+func writeToolBatch(wb *badger.WriteBatch, records []*ToolRecord, schemas map[string]map[string]any) error {
 	// 1. Save all schemas
 	for hash, schema := range schemas {
 		data, err := json.Marshal(schema)
@@ -667,8 +891,29 @@ func (s *Store) BatchSaveTools(records []*ToolRecord, schemas map[string]map[str
 			return err
 		}
 	}
+	return wb.Flush()
+}
 
-	if err := wb.Flush(); err != nil {
+// BatchSaveTools saves multiple tools and their schemas. Writes go through a Badger
+// WriteBatch (BDG-2), which flushes internally as it fills, so a large server sync
+// can never exceed the single-transaction size limit (ErrTxnTooBig) the way the old
+// one-shot Update did. The new-tool count uses a cheap read pass beforehand.
+func (s *Store) BatchSaveTools(records []*ToolRecord, schemas map[string]map[string]any) error {
+	// Pre-pass: count which tool URNs are new (for the in-memory counter only).
+	var totalNewTools int64
+	if len(records) > 0 {
+		viewOrWarn(s.DB, func(txn *badger.Txn) error {
+			for _, record := range records {
+				if _, gErr := txn.Get([]byte("tool:" + record.URN)); errors.Is(gErr, badger.ErrKeyNotFound) {
+					totalNewTools++
+				}
+			}
+			return nil
+		})
+	}
+
+	// One admitted write spans the batch: it commits as it fills, and Flush or Cancel waits for those commits.
+	if err := s.write(func() error { return writeToolBatch(s.DB.NewWriteBatch(), records, schemas) }); err != nil {
 		return err
 	}
 
@@ -913,11 +1158,11 @@ func (s *Store) SaveIntelligence(urn string, intel *ToolIntelligence) error {
 	}
 
 	// Async Bleve re-index. Use the already-merged private snapshot when we have
-	// one; otherwise fetch a fresh (copied) record inside the goroutine.
-	s.bgWg.Add(1)
-	go func(ctx context.Context, snapshot *ToolRecord) {
-		defer s.bgWg.Done()
-
+	// one; otherwise fetch a fresh (copied) record inside the goroutine. Once Close
+	// has begun the re-index is not started: the intelligence is saved, the index
+	// entry keeps its old fields until the tool is next re-indexed.
+	ctx, snapshot := s.ctx, merged
+	s.goBackground("intelligence re-index", func() {
 		// Preempt before fetching
 		select {
 		case <-ctx.Done():
@@ -944,7 +1189,7 @@ func (s *Store) SaveIntelligence(urn string, intel *ToolIntelligence) error {
 		if err := s.Index.IndexRecord(ToBleveDoc(rec)); err != nil {
 			slog.Warn("Failed to update search index for intelligence overlay", "urn", urn, "error", err)
 		}
-	}(s.ctx, merged)
+	})
 	return nil
 }
 
@@ -1020,7 +1265,7 @@ func (s *Store) SaveSchema(hash string, schema map[string]any) error {
 		slog.Error("database: schema compression failed", "op", "SaveSchema", "hash", hash, "error", err)
 		return fmt.Errorf("failed to compress schema: %w", err)
 	}
-	err = s.DB.Update(func(txn *badger.Txn) error {
+	err = s.update(func(txn *badger.Txn) error {
 		return txn.Set([]byte("schema:"+hash), compressed)
 	})
 	if err == nil {
@@ -1445,7 +1690,7 @@ func (s *Store) SaveRawResource(id string, data []byte) error {
 		return err
 	}
 
-	return s.DB.Update(func(txn *badger.Txn) error {
+	return s.update(func(txn *badger.Txn) error {
 		// 🛡️ FIX: Add TTL to prevent unbounded disk growth from cached proxy results.
 		e := badger.NewEntry([]byte("raw:"+id), compressed).WithTTL(1 * time.Hour)
 		return txn.SetEntry(e)
@@ -1629,23 +1874,22 @@ func (s *Store) PurgeServerTools(serverName string) error {
 
 	if err == nil && len(toDelete) > 0 {
 		// Write phase: delete via a WriteBatch (auto-flushes by size).
-		wb := s.DB.NewWriteBatch()
-		for _, key := range toDelete {
-			ks := string(key)
-			if strings.HasPrefix(ks, "tool:") {
-				purgedTools++
-			} else if strings.HasPrefix(ks, "intel:") {
-				purgedIntel++
+		err = s.write(func() error {
+			wb := s.DB.NewWriteBatch()
+			for _, key := range toDelete {
+				ks := string(key)
+				if strings.HasPrefix(ks, "tool:") {
+					purgedTools++
+				} else if strings.HasPrefix(ks, "intel:") {
+					purgedIntel++
+				}
+				if dErr := wb.Delete(key); dErr != nil {
+					wb.Cancel()
+					return dErr
+				}
 			}
-			if dErr := wb.Delete(key); dErr != nil {
-				wb.Cancel()
-				err = dErr
-				break
-			}
-		}
-		if err == nil {
-			err = wb.Flush()
-		}
+			return wb.Flush()
+		})
 		if err == nil {
 			// Remove purged tools from the search index (outside the Badger batch).
 			for _, urn := range toolURNs {
@@ -2116,7 +2360,7 @@ func (s *Store) SaveLog(entry []byte, ttl time.Duration) error {
 	// Use UnixNano for chronological sorting (ascending by default in Badger)
 	timestamp := time.Now().UnixNano()
 	key := fmt.Appendf(nil, "log:%020d", timestamp)
-	return s.DB.Update(func(txn *badger.Txn) error {
+	return s.update(func(txn *badger.Txn) error {
 		e := badger.NewEntry(key, entry).WithTTL(ttl)
 		return txn.SetEntry(e)
 	})
@@ -2241,14 +2485,14 @@ func (s *Store) GetExtendedDiagnostics() (*DiagnosticStats, error) {
 
 // SaveTrigger persists a keyword-to-server mapping for predictive discovery.
 func (s *Store) SaveTrigger(keyword, server string) error {
-	return s.DB.Update(func(txn *badger.Txn) error {
+	return s.update(func(txn *badger.Txn) error {
 		return txn.Set([]byte("trigger:"+keyword), []byte(server))
 	})
 }
 
 // SaveWithTTL saves a key-value pair with a time-to-live.
 func (s *Store) SaveWithTTL(key string, val []byte, ttl time.Duration) error {
-	return s.DB.Update(func(txn *badger.Txn) error {
+	return s.update(func(txn *badger.Txn) error {
 		e := badger.NewEntry([]byte(key), val).WithTTL(ttl)
 		return txn.SetEntry(e)
 	})
@@ -2325,7 +2569,7 @@ func (s *Store) PopulateDefaultTriggers() {
 		"duckduckgo": serverDdgSearch,
 		"internet":   serverDdgSearch,
 	}
-	err := s.DB.Update(func(txn *badger.Txn) error {
+	err := s.update(func(txn *badger.Txn) error {
 		for keyword, server := range defaults {
 			if err := txn.Set([]byte("trigger:"+keyword), []byte(server)); err != nil {
 				return err
@@ -2473,7 +2717,7 @@ func (s *Store) WipeAll() error {
 	slog.Warn("database: initiating COMPLETE data wipe")
 
 	// 1. Drop all data from Badger
-	if err := s.DB.DropAll(); err != nil {
+	if err := s.write(s.DB.DropAll); err != nil {
 		return fmt.Errorf("failed to drop badger data: %w", err)
 	}
 
@@ -2519,7 +2763,7 @@ func (s *Store) ComputeTrending() map[string]map[string]float64 {
 // WipeDatabase permanently drops all tools, intelligence, and resets searches
 func (s *Store) WipeDatabase() error {
 	// 1. Drop Badger KV space
-	if err := s.DB.DropAll(); err != nil {
+	if err := s.write(s.DB.DropAll); err != nil {
 		return fmt.Errorf("failed to drop KV store: %w", err)
 	}
 

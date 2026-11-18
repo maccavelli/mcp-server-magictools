@@ -231,19 +231,18 @@ func (c *ResponseCache) Set(key string, result *mcp.CallToolResult, ttl time.Dur
 	if store != nil && store.DB != nil {
 		b, err := json.Marshal(result)
 		if err == nil {
-			store.bgWg.Add(1)
-			go func(data []byte, cacheKey string, cacheTTL time.Duration) {
-				defer store.bgWg.Done()
+			data, cacheKey, cacheTTL := b, key, ttl
+			store.goBackground("L2 cache write", func() { // refused once the store is closing: the L2 copy is dropped
 				select {
 				case <-store.closing:
 					return
 				default:
 				}
-				updateOrWarn(store.DB, func(txn *badger.Txn) error {
+				store.updateOrWarn(func(txn *badger.Txn) error {
 					e := badger.NewEntry([]byte("cache:l2:"+cacheKey), data).WithTTL(cacheTTL)
 					return txn.SetEntry(e)
 				})
-			}(b, key, ttl)
+			})
 		}
 	}
 }

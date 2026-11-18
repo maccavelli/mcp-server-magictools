@@ -25,7 +25,7 @@ func FlushMetricBucket(store *Store, snapshot map[string]any) {
 		return
 	}
 
-	err = store.DB.Update(func(txn *badger.Txn) error {
+	err = store.update(func(txn *badger.Txn) error {
 		// 1. Persist the current gauges bucket (30-day TTL)
 		eBucket := badger.NewEntry([]byte(key), b).WithTTL(30 * 24 * time.Hour)
 		if err := txn.SetEntry(eBucket); err != nil {
@@ -90,7 +90,7 @@ func FlushHFSCTrace(store *Store, doc HFSCTraceDocument) {
 	key := fmt.Sprintf("telemetry:trace:%s", doc.ID)
 	b, err := json.Marshal(doc)
 	if err == nil {
-		updateOrWarn(store.DB, func(txn *badger.Txn) error {
+		store.updateOrWarn(func(txn *badger.Txn) error {
 			e := badger.NewEntry([]byte(key), b).WithTTL(30 * 24 * time.Hour)
 			return txn.SetEntry(e)
 		})
@@ -116,7 +116,7 @@ func FlushProxyCall(store *Store, record ProxyCallRecord) {
 	key := fmt.Sprintf("proxy:call:%s:%d", record.URN, record.Timestamp)
 	b, err := json.Marshal(record)
 	if err == nil {
-		updateOrWarn(store.DB, func(txn *badger.Txn) error {
+		store.updateOrWarn(func(txn *badger.Txn) error {
 			e := badger.NewEntry([]byte(key), b).WithTTL(7 * 24 * time.Hour)
 			return txn.SetEntry(e)
 		})
@@ -139,7 +139,7 @@ func FlushTokenQuotas(store *Store, total int64, perServer map[string]int64) {
 		PerServer:   perServer,
 	}
 	if b, err := json.Marshal(record); err == nil {
-		updateOrWarn(store.DB, func(txn *badger.Txn) error {
+		store.updateOrWarn(func(txn *badger.Txn) error {
 			return txn.SetEntry(badger.NewEntry([]byte("llm:quota:global"), b))
 		})
 	}

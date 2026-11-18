@@ -31,6 +31,10 @@ Associated MADR:
 | `internal/db/cache.go`, `internal/db/historical.go`, `internal/db/io_helpers.go` | the four `updateOrWarn(store.DB, ...)` write sites and `store.DB.Update` at `historical.go:28` go through the gate |
 | `internal/db/store_close_test.go`, `internal/db/store_closing_helper_test.go`, `internal/db/store_close_bound_test.go` | new: T2 to T5 (P1, written), the helper they share (P1), and T6 (joins P2) |
 | `internal/handler/minify_close_refused_test.go` | new: T1 below (P1, written) |
+| `internal/db/store_close_gate_test.go` | new (P2, 2026-11-17): every write site refused while `Close` waits, a refused write not retried, a nested admission, two `Close` calls at once, reads not gated |
+| `internal/db/store_close_recover_test.go` | new (P2, 2026-11-17, third ruling): the recovery past the bound on the three iterator paths and on a site without an error result; five cases in which the panic must propagate; the panic-origin test |
+| `internal/db/metrics_flush_helpers.go` | the post-flush refresh starts through the gate (fourth ruling, 2026-11-17) |
+| `internal/db/store_close_starts_test.go` | new (fourth ruling, 2026-11-17): `Close` against the four goroutine starts, the refused starts, a start admitted before `Close`, a started goroutine's write while closing |
 | `docs/guides/services-and-transports.md` | one paragraph in "Readiness and shutdown" |
 | `docs/README.md` | the two index rows for this pair (the coordinator adds them) |
 
@@ -79,6 +83,8 @@ Associated MADR:
 - Nothing committed names a host, an account or a machine path.
 - **Commits.** Since 2026-11-17 the owner makes every commit and push. Agents and the coordinator stage only, by path;
   each phase says what to stage. No agent runs `git commit` or `git push`.
+- *Annotation, 2026-11-17 (evening):* the owner restored the coordinator's commits and pushes to the default branch.
+  Agents still stage by path and do not commit; the bullet above stood until then.
 
 ## Implementation Steps
 
@@ -265,9 +271,325 @@ Run on a `git archive` copy of `5e8821e` with only the new test files added (`go
     minify_close_refused_test.go:113: the queued save failed with DB Closed, want the store-closing refusal (error text "store closing")
 ```
 
+*Annotation, 2026-11-17 (P2):* the T2 line above quotes `DB Closed`, but the library's first refusal text varies between
+runs. The P2 re-run on `3443524` printed `store_close_test.go:82: iteration 0: 4 writer failures, first: refusal is not
+ErrStoreClosing: Writes are blocked, possibly due to DropAll or Close`. Either text is the red.
+
 - T6 (`TestStore_CloseDrainBoundIsHonoured`) joins P2: it needs the drain bound as a package variable, which is production
   code. Its scratch copy is kept for P2; its red is its planted break in P4.
 - T1 is not red under `-race` on `5e8821e`: the detector's report is not reproducible at the gate level (MADR, R2), so
   T1's red is the refusal assertion, not a race report. Its race part is held by the whole-package gate in P6.
 - Left unstaged: `internal/db/store_close_test.go`, `internal/db/store_closing_helper_test.go`,
   `internal/handler/minify_close_refused_test.go`.
+
+### 2026-11-17, owner's commit rule restored
+
+- As of the evening of 2026-11-17 the owner restored the coordinator's commits and pushes to the default branch (the
+  Conventions bullet and the MADR's commit rule are annotated, not rewritten). Agents still stage by path only.
+
+### 2026-11-17, P2 stopped, and the deviation the third ruling resolved
+
+- **Stop.** Before building, P2 found that a write admitted before closing and still running when `Close`'s wait runs
+  out can panic once Badger is closed: deterministically when it opens an iterator (`badger/v4@v4.9.1/iterator.go:463-464`,
+  3 of 3 scratch runs), and in a narrow commit window ("send on closed channel", `badger/v4@v4.9.1/db.go:884`, `:904`
+  against `:538`, `:550`). Nothing was built; three options went to the owner.
+- **Resolution (the owner, 2026-11-17).** "Catch a panic only in a write that outlived the wait (Recommended)". Recorded
+  in the MADR ("Decided, third ruling"). The recovery is in addition to the gate, never instead of it.
+- **What it adds to this plan.** The recovery in the write path; its tests (`store_close_recover_test.go`, scope table);
+  its plants (P4 below). The test seam it needs: a per-store hook, `txnStartHook`, run at the start of each transaction
+  function of `UpdateWithRetryCtx` only when a test sets it (one atomic load otherwise).
+- **A second departure from P2's letter, called out here.** P2 step 1 says "the drain bound as a package variable (so
+  T6 can shorten it)". The change keeps the bound a constant, `storeDrainTimeout` (5 s), and gives `Store` an
+  unexported field, `drainWait`, that `Close` uses when set; T6 and the recovery tests set the field on their own store.
+  Same purpose; no package-level state that a test writes while another store may read it. Reversible in minutes if the
+  coordinator prefers the letter.
+
+### 2026-11-17, P2: the gate, staged, not committed
+
+Built on a `git archive` copy of `3443524` plus the P1 files; every run below is on such a copy.
+
+- **The write sites: 18, as in the MADR (E14).** All 18 go through the gate: `DB.Update` at `internal/db/badger.go:245`
+  (`RecordSynergy`'s flush), `:592` (`UpdateWithRetryCtx`, one admission per attempt), `:1023`, `:1448`, `:2119`,
+  `:2244`, `:2251`, `:2328`, `internal/db/historical.go:28`; `NewWriteBatch` at `badger.go:365`, `:637`, `:1632` (one
+  admission spans the batch to its `Flush` or `Cancel`); `DropAll` at `badger.go:2476`, `:2522`; the four
+  `updateOrWarn` callers (`cache.go:242`, `historical.go:93`, `:119`, `:142`), which now call a store method
+  (`Store.updateOrWarn`) instead of the package helper, as P2 step 3 asked. Considered, left ungated (MADR E21, E22):
+  `RunValueLogGC` (`gc_helpers.go:39`) and the six index writes. No raw `s.DB.Update`, `NewWriteBatch` or `DropAll`
+  remains outside the gate (checked by `grep` over `internal/db/*.go`, tests excluded).
+- **The gate.** `writeGate`: a mutex, a closed flag, a counter of admitted writes, an idle channel, and a flag that
+  records that `Close`'s wait ran out. `Store.write(fn)` admits, runs `fn`, and ends the write in a deferred function;
+  `Store.update(fn)` is `write` around one `DB.Update`.
+- **`Close`.** Shut the gate (later writes get `ErrStoreClosing`); wait up to 5 s for admitted writes; if any remains,
+  log one warning naming how many and go on; then the old sequence (signal and wait for the store's goroutines, PID
+  file, lock, index, Badger). It returns Badger's close error; a wait that ran out is the warning, not an error. Once:
+  a second or concurrent `Close` waits for the first and returns its result (T4, `TestStore_ConcurrentCloseIsSafe`).
+- **Nesting.** No write path in `internal/db` admits a write inside another today (the investigator's scan, MADR E19,
+  re-checked: the only store call inside a write's closure is `flushLoadedMetrics`, which takes the transaction it is
+  given, and `PurgeStaleServerTools` calls the index, which is not gated). With a counter, nesting is safe by
+  construction: a nested admission is admitted or refused at once, never blocked; `TestStore_NestedAdmissionCannotDeadlockClose`
+  fails if admission ever waits for `Close`.
+  *Annotation, 2026-11-18 (review note N1):* "no write is admitted inside another" holds for store calls only. In
+  production every `slog` call inside an admitted write's closure is a nested admission, because the global logger
+  writes each record through `Store.SaveLog` (MADR, E19 annotated). The counter makes it harmless, as stated above.
+- **The recovery (third ruling).** In `write`'s deferred function: only when the wait ran out, Badger is closed, and the
+  first frame below the runtime's panic frames is a `badger/v4` function, the panic is recovered and becomes an error
+  wrapping `ErrStoreClosing` with the panic's text, with one warning. Otherwise `recover` is not called, so the panic
+  propagates with its own value and stack; nothing is re-raised. A late write that gets an error, not a panic, keeps the
+  library's error (MADR F10).
+- **Callers** (scan of every non-test call of the gated entry points): pool tasks (`MinifyResponse`, usage counts) log
+  at warn; bare goroutines (`FlushProxyCall`, `FlushHFSCTrace`, the orphan sweep) log at warn, and the proxy-metrics
+  flusher logs each failed save at error level (as it did for Badger's errors before); the sync goroutines and the
+  request-path callers log at warn or return the error to their caller; `RecordSynergy`'s own goroutine logs at error
+  level once per write in flight; the log writer returns it to `slog`, which drops it; only the CLI `db wipe` returns
+  it as a failure, and it never runs while closing. No caller treats it as fatal; none loops on it: `UpdateWithRetryCtx`
+  retries conflicts only, and a refusal is returned at once (`TestStore_RefusedWriteIsNotRetried`). No caller changed.
+- **Tests, green on the change:** T1 to T6, and the 15 tests of the two new files; `-count=20` of the 20 store tests:
+  exit 0. One of the new tests (`TestStore_Recovery_ClosedDatabaseWithoutTimeoutPropagates`) was flaky as first
+  written: it closed Badger behind the store's back while the store's own background re-index could still be reading,
+  and that read panicked (first P4 pass, eleven plants' runs ended in that panic). It now waits for the store's
+  goroutines first; the second P4 pass and 20 rounds are clean.
+- **Product probe** (the MADR's R5 on the change, scratch only): 900 iterations, 0 panics, 0 writers that never
+  returned, 900 of 900 reopens ok, 0 iterations with an acknowledged save missing; 3600 refusals, all `ErrStoreClosing`;
+  0 `DB Closed`, 0 `Writes are blocked`; 342438 saves ok; the wait never ran out. With the wait cut to 1 ns, 2400
+  iterations: 0 panics reached a writer, 0 hangs, 2400 reopens ok, 0 missing; one commit-window panic ("send on closed
+  channel") was converted; 164 late writes got the library's "Writes are blocked" error (F10).
+- **Handler-level probe** (scratch only): pool saves, bare-goroutine flushes, usage counts and proxy-metric saves against
+  `Close` at a random point, 300 iterations: 0 panics, 0 hangs, the pool drained every time. With `RecordSynergy` also
+  running, `Close` panicked on its own WaitGroup (MADR F9), on `3443524` as on the change: put to the owner, not fixed.
+- **Benchmark** (Apple M1 Pro, six alternating runs of a small `SaveWithTTL`): `3443524` median 5506 ns/op, the change
+  5551 ns/op, both 40 allocs/op and about 1.68 KB/op; the gate alone 28 ns/op serial and 250 ns/op with ten cores
+  contending, 0 allocs.
+- **Not verified:** the commit-window panic was not forced on demand (no seam inside the library); it was seen once in
+  2400 iterations and converted. A write hung inside the library cannot be tested without a hang.
+
+### 2026-11-17, P4: planted breaks, staged, not committed
+
+Each plant through `go test -overlay` on the copy (the files are never edited); each failed a named test with a test
+failure, not a build failure. First failing test and line:
+
+| Plant | Fails (first) |
+| :--- | :--- |
+| the gate never refuses | `TestStore_EveryWriteSiteIsRefusedWhileClosing`, `store_close_gate_test.go:148`; also T2, T3, T1 |
+| `Close` does not wait | `TestStore_CloseDrainBoundIsHonoured`, `store_close_bound_test.go:35`; also T5 |
+| the bound ignored (an hour) | `TestStore_CloseDrainBoundIsHonoured`, `store_close_bound_test.go:38` |
+| the bound too eager (none) | `TestStore_CloseDrainBoundIsHonoured`, `store_close_bound_test.go:35`; also T5, T2 |
+| `SaveRawResource` ungated | `TestStore_EveryWriteSiteIsRefusedWhileClosing`, `store_close_gate_test.go:148`; also T3, T2, T1 |
+| `FlushProxyCall` ungated (a bare goroutine's write) | `TestStore_EveryWriteSiteIsRefusedWhileClosing`, `store_close_gate_test.go:170` |
+| `RecordSynergy`'s flush ungated (a store goroutine) | same test, `store_close_gate_test.go:170` |
+| the L2 cache write ungated (a store goroutine) | same test, `store_close_gate_test.go:170` |
+| `BatchSaveTools` ungated (a write batch) | same test, `store_close_gate_test.go:148` |
+| `WipeAll` ungated (`DropAll`) | same test, `store_close_gate_test.go:148` |
+| the sentinel replaced by the library's error | `TestStore_EveryWriteSiteIsRefusedWhileClosing`, `store_close_gate_test.go:148`; also T2, T3, T1 |
+| a refused write retried | `TestStore_RefusedWriteIsNotRetried`, `store_close_gate_test.go:201` |
+| the second `Close` unguarded | `TestStore_ConcurrentCloseIsSafe`, `store_close_gate_test.go:285`; also T4 |
+| a nested admission waits for `Close` | `TestStore_NestedAdmissionCannotDeadlockClose`, `store_close_gate_test.go:240` |
+| the recovery converts while the store is open | `TestStore_Recovery_LibraryPanicWhileOpenPropagates`, `store_close_recover_test.go:239` |
+| the recovery converts within the bound (no wait-ran-out check) | `TestStore_Recovery_ClosedDatabaseWithoutTimeoutPropagates`, `store_close_recover_test.go:289` |
+| the recovery converts before Badger is closed (no closed check) | `TestStore_Recovery_TimedOutButDatabaseOpenPropagates`, `store_close_recover_test.go:315` |
+| the recovery does not re-raise (recovers every panic) | `TestStore_Recovery_LibraryPanicWhileOpenPropagates`, `store_close_recover_test.go:239`; also the non-library case |
+| the recovery missing from `PurgeServerIntelligence` | `TestStore_PastBound_PurgeServerIntelligenceReturnsErrStoreClosing`, `store_close_recover_test.go:168` |
+| the wait-ran-out flag never set | `TestStore_CloseDrainBoundIsHonoured`, `store_close_bound_test.go:41`; also every past-bound test |
+
+Survivors: none.
+
+### 2026-11-17, P5: docs, staged, not committed
+
+- `docs/guides/services-and-transports.md`, "Readiness and shutdown": one paragraph (the gate, the five-second wait, the
+  refusal, the recovery past the bound, the hung write, reads not gated).
+- Doc comments on `ErrStoreClosing`, `writeGate`, `Store.write`, `Store.Close`.
+- `docs/architecture.md` does not describe the store's lifecycle: unchanged. `README.md` says nothing that the change
+  makes false.
+
+### 2026-11-17, P6: the gates, staged, not committed
+
+On a `git archive` copy of `3443524` plus the staged files; heavy runs through the host's heavy-run queue, one at a
+time; every Go run with `HOME` and the configuration directory moved to a temporary directory. Start and end UTC;
+exit status taken before any filter.
+
+| Gate | Start | End | Exit | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| `gofmt -l` on the ten changed Go files | 2026-11-18T02:51:51Z | 2026-11-18T02:51:51Z | 0 |  |
+| `golint`, one call per changed Go file | 2026-11-18T02:51:51Z | 2026-11-18T02:51:51Z | 0 | nine files silent; `internal/db/badger.go`: the same five findings as on `3443524` (exported-name comments at lines 45, 47, 49, 924, 975, none in changed code) |
+| `go vet ./...` | 2026-11-18T02:51:51Z | 2026-11-18T02:51:54Z | 0 |  |
+| `go mod tidy -diff` | 2026-11-18T02:51:54Z | 2026-11-18T02:51:54Z | 0 |  |
+| `make lint`, golangci-lint v2.13.1 built with Go 1.26.6 | 2026-11-18T02:51:54Z | 2026-11-18T02:52:14Z | 0 | 0 issues |
+| `make lint`, golangci-lint v2.15.0 built with Go 1.26.6 | 2026-11-18T02:52:14Z | 2026-11-18T02:52:23Z | 2 | 2 issues, both present on `3443524` and in other plans' files: `list_tools_handler.go:19:1` gocognit, `pipeline_tools.go:161:33` gocritic |
+| `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...` | 2026-11-18T02:52:23Z | 2026-11-18T02:52:27Z | 0 |  |
+| `GOOS=windows GOARCH=amd64 go build ./...` | 2026-11-18T02:52:27Z | 2026-11-18T02:52:32Z | 0 |  |
+| `GOOS=darwin GOARCH=arm64 go build ./...` | 2026-11-18T02:52:32Z | 2026-11-18T02:52:34Z | 0 |  |
+| `python3 scripts/check_records.py --check-all` | 2026-11-18T02:54:13Z | 2026-11-18T02:54:13Z | 0 |  |
+| `markdownlint-cli2@0.23.2` (the `make markdownlint` command) | 2026-11-18T02:54:13Z | 2026-11-18T02:54:14Z | 0 |  |
+| `go test -count=1 -timeout 20m ./...` | 2026-11-18T02:52:49Z | 2026-11-18T02:59:52Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 1 | 2026-11-18T02:59:52Z | 2026-11-18T03:05:15Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 2 | 2026-11-18T03:05:15Z | 2026-11-18T03:10:17Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 3 | 2026-11-18T03:10:17Z | 2026-11-18T03:17:45Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 4 | 2026-11-18T03:17:45Z | 2026-11-18T03:25:42Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 5 | 2026-11-18T03:25:42Z | 2026-11-18T03:30:32Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/db/...` | 2026-11-18T03:30:33Z | 2026-11-18T03:34:55Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=3 -timeout 40m ./...` | 2026-11-18T03:34:55Z | 2026-11-18T03:36:14Z | 1 | DATA RACE 0, panic lines 0; failing: 2 TestProxyMetrics; 2 TestProxyRelayTracker |
+| `go test -race -count=1 -timeout 10m ./internal/telemetry/` (F8 check) | 2026-11-18T03:36:26Z | 2026-11-18T03:36:30Z | 0 | DATA RACE 0, panic lines 0 |
+
+- The start times of the heavy runs include the wait in the queue.
+- The whole-module run under `-race`: 18 packages ok, 1 FAIL (`internal/telemetry`): `TestProxyMetrics` and
+  `TestProxyRelayTracker` failed on two of three rounds (`proxy_metrics_extra_test.go:28`, `boot_spans_extra_test.go:32`),
+  the MADR's F8, older than this change; the same package at `-count=1` under `-race` exits 0. No `DATA RACE` anywhere.
+- The five whole-package handler gates: 5 of 5 exit 0, 0 `DATA RACE`.
+- `check_records` and `markdownlint` were run again on the final records, with this entry in place: exit 0 both.
+- Go for the tests: the host's default toolchain (go1.27.4), as in the MADR's baseline; the linters were built with
+  Go 1.26.6 and run with `GOTOOLCHAIN=go1.26.6`.
+- Staged by path, not committed: the ten Go files, the guide, and these two records.
+
+### 2026-11-17, F9: the store's goroutine starts through the gate (fourth ruling), staged, not committed
+
+- **Ruling.** "In 0009, by amendment: those four starts go through the gate (Recommended)" (MADR, "Decided, fourth
+  ruling"). Built on a `git archive` copy of `3443524` plus the staged files.
+- **Sites, re-derived** (`grep` for `bgWg.Add` and `bgWg.Go` in `internal/db`, tests excluded; lines at `3443524`):
+  `badger.go:234` (`RecordSynergy`), `badger.go:917` (`SaveIntelligence`'s re-index), `cache.go:234` (the L2 cache
+  write), `metrics_flush_helpers.go:130` (the post-flush refresh); and `gc_helpers.go:91`, reached only from `NewStore`
+  before the store is returned, left as it is. The only `bgWg.Wait` is `Close`'s.
+- **Red first, on the change as first staged.** `TestStore_CloseWhileStoreGoroutinesStart` (all four sites starting
+  while `Close` runs at a random point, 100 iterations a run): 10 runs of 10 failed, `store_close_starts_test.go:75:
+  iteration N: Close panicked: sync: WaitGroup is reused before previous Wait has returned`, at iterations 0 to 43
+  (10 panics in 135 iterations, about one in 14). `TestStore_BackgroundStartsAreRefusedOnceClosing`: all four subtests
+  failed (no refusal; the synergy flush and the L2 write still ran).
+- **The fix.** `Store.goBackground(work, fn)`: under the gate's mutex, refuse the start if the gate is shut, else
+  `bgWg.Add(1)`; then start the goroutine. The four sites use it. The first refused start of a store logs one info line
+  naming the work. Two test seams, each one atomic load when unset: `startHook` (inside the admission, just before
+  `bgWg.Add`) and `runHook` (first on each started goroutine).
+- **Green.** The stress test: 10 runs of 10 passed (1000 iterations, 0 panics, 0 hangs); every store test (24 top-level
+  tests) passes 3 rounds; T1 passes.
+- **Two new tests the plants asked for.** With the starts gated, the plants that un-gate the write inside the synergy
+  flush and the L2 write survived the earlier tests (the goroutine is no longer started while closing).
+  `TestStore_StartedGoroutineWriteIsRefusedWhileClosing` parks a goroutine started before `Close` and lets it write
+  while `Close` waits: both plants fail it. `TestStore_StartAdmittedBeforeCloseIsCountedFirst` parks a start inside its
+  admission: `Close` must not return before the start is counted.
+- **Probes, on the final code** (scratch only). The handler-level probe with all four start sites and `RecordSynergy`
+  running against `Close` (the probe that panicked in 2 of 3 runs on `3443524` and 3 of 3 on the change as first
+  staged): 300 iterations, 0 panics, 0 hangs, the pool drained every time. The store-level probe of the MADR's R5:
+  900 iterations, 0 panics, 0 writers that never returned, 900 of 900 reopens ok, 0 iterations with an acknowledged
+  save missing, 3600 refusals (all `ErrStoreClosing`), 252670 saves ok.
+- **Docs.** The guide's "Readiness and shutdown" paragraph gains one sentence (the store's own background work is not
+  started once closing has begun; one info line says so; the close waits for work already started). Doc comment on
+  `goBackground`; comments at the four sites say what a refused start drops.
+
+Plants, all on the final code (26: the 20 of P4 and six for this amendment); each failed a named test with a
+test failure. The six:
+
+| Plant | Fails (first) |
+| :--- | :--- |
+| `RecordSynergy`'s start un-gated | `TestStore_CloseWhileStoreGoroutinesStart`, `store_close_starts_test.go:75` ("Close panicked: sync: WaitGroup is reused …") |
+| the re-index start un-gated | `TestStore_BackgroundStartsAreRefusedOnceClosing/SaveIntelligence`, `:252` |
+| the L2 cache write start un-gated | `TestStore_CloseWhileStoreGoroutinesStart`, `:75` |
+| the post-flush refresh start un-gated | `TestStore_BackgroundStartsAreRefusedOnceClosing/FlushMetrics`, `:273` |
+| the admission released before `bgWg.Add` | `TestStore_StartAdmittedBeforeCloseIsCountedFirst`, `:106` |
+| a refused start that still runs | `TestStore_BackgroundStartsAreRefusedOnceClosing/RecordSynergy`, `:219` |
+
+Of the 20 earlier plants, the two that un-gate the writes inside the synergy flush and the L2 write now fail
+`TestStore_StartedGoroutineWriteIsRefusedWhileClosing` (`:168`); the other 18 fail as recorded under P4. Survivors:
+none.
+
+*Annotation, 2026-11-18 (review, S1):* the row "the admission released before `bgWg.Add`" above is the plant that
+moved the test hook outside the mutex together with the `Add`; that one fails at `:106`. The reviewer's plant moved
+only the `Add` and left the hook inside the mutex: it survived every test without `-race` and was caught only under
+`-race` ("race detected during execution of test" in `TestStore_StartAdmittedBeforeCloseIsCountedFirst`). Answered in
+the entry of 2026-11-18 below.
+
+### 2026-11-17, P6 again, after the fourth ruling: the gates, staged, not committed
+
+On a `git archive` copy of `3443524` plus the staged files; heavy runs through the host's heavy-run queue, one at a
+time; every Go run with `HOME` and the configuration directory moved to a temporary directory. Start and end UTC;
+exit status taken before any filter.
+
+| Gate | Start | End | Exit | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| `gofmt -l` on the twelve changed Go files | 2026-11-18T04:48:28Z | 2026-11-18T04:48:28Z | 0 |  |
+| `golint`, one call per changed Go file | 2026-11-18T04:48:28Z | 2026-11-18T04:48:28Z | 0 | eleven files silent; `internal/db/badger.go`: the same five findings as on `3443524` (exported-name comments, none in changed code) |
+| `go vet ./...` | 2026-11-18T04:48:28Z | 2026-11-18T04:48:30Z | 0 |  |
+| `go mod tidy -diff` | 2026-11-18T04:48:30Z | 2026-11-18T04:48:30Z | 0 |  |
+| `make lint`, golangci-lint v2.13.1 built with Go 1.26.6 | 2026-11-18T04:48:30Z | 2026-11-18T04:48:41Z | 0 | 0 issues |
+| `make lint`, golangci-lint v2.15.0 built with Go 1.26.6 | 2026-11-18T04:48:41Z | 2026-11-18T04:48:56Z | 2 | 2 issues, both on `3443524` and in other plans' files: `list_tools_handler.go:19:1` gocognit, `pipeline_tools.go:161:33` gocritic |
+| `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...` | 2026-11-18T04:48:56Z | 2026-11-18T04:49:08Z | 0 |  |
+| `GOOS=windows GOARCH=amd64 go build ./...` | 2026-11-18T04:49:08Z | 2026-11-18T04:49:19Z | 0 |  |
+| `GOOS=darwin GOARCH=arm64 go build ./...` | 2026-11-18T04:49:19Z | 2026-11-18T04:49:23Z | 0 |  |
+| `go test -count=1 -timeout 20m ./...` | 2026-11-18T04:49:40Z | 2026-11-18T04:54:34Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 1 | 2026-11-18T04:54:34Z | 2026-11-18T04:59:45Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 2 | 2026-11-18T04:59:45Z | 2026-11-18T05:05:13Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 3 | 2026-11-18T05:05:13Z | 2026-11-18T05:21:33Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 4 | 2026-11-18T05:21:33Z | 2026-11-18T05:30:34Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...`, run 5 | 2026-11-18T05:30:34Z | 2026-11-18T05:36:33Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=20 -timeout 30m ./internal/db/...` | 2026-11-18T05:36:33Z | 2026-11-18T05:43:46Z | 0 | DATA RACE 0, panic lines 0 |
+| `go test -race -count=3 -timeout 40m ./...` | 2026-11-18T05:43:47Z | 2026-11-18T05:45:07Z | 1 | DATA RACE 0, panic lines 0; failing: 2 TestProxyMetrics; 2 TestProxyRelayTracker |
+| `go test -race -count=1 -timeout 10m ./internal/telemetry/` (F8 check) | 2026-11-18T05:45:07Z | 2026-11-18T05:45:09Z | 0 | DATA RACE 0, panic lines 0 |
+
+- Run after the last Go change of the amendment. The start times of the heavy runs include the wait in the queue.
+- The five whole-package handler gates: 5 of 5 exit 0, 0 `DATA RACE`.
+- The whole-module run under `-race`: 18 packages ok, 1 FAIL (`internal/telemetry`): `TestProxyMetrics` and
+  `TestProxyRelayTracker` on two of three rounds (`proxy_metrics_extra_test.go:28`, `boot_spans_extra_test.go:32`),
+  the MADR's F8; the package at `-count=1` under `-race` exits 0. No `DATA RACE` anywhere.
+- `check_records` and `markdownlint` were run again on the final records, with this entry in place: exit 0 both.
+- Staged by path, not committed: the twelve Go files, the guide, and these two records.
+
+### 2026-11-18, deviation: the whole-module gate is owed
+
+- **What.** The PLAN's whole-module gate (P6 item 4; the MADR's Confirmation item 5), `go test -race -count=3 -timeout
+  40m ./...`, is not run for this pass, and no `go test ./...`, `go test ./internal/client/...`, `make test`, `make race`
+  or built binary of this module runs on this machine.
+- **Why.** Three tests in `internal/client` (`TestExtraManagerMethods`, `TestPruneOrphansEnumeratesExactlyOnce`,
+  `TestHealthMonitor_Lifecycle`) run the orphan reaper for real: `PruneOrphans` (`internal/client/process_reaper.go:89-149`)
+  signals every process of the user whose environment carries the marker the owner's live service puts on its
+  sub-servers. A throwaway `HOME` does not prevent it.
+- **The owner's ruling (2026-11-18; the label quoted only as a label):** "Fix the hazard first, under its own short
+  record; until then run only the safe packages here (Recommended)". Allowed here: `./internal/db/...`,
+  `./internal/handler/...`, `./cmd/...`, with a throwaway `HOME`.
+- **Consequence.** The whole-module gate is owed. It is run after that record's fix lands. The earlier whole-module
+  runs of this record (P6, 2026-11-18 02:52 to 03:36 UTC and again 04:49 to 05:45 UTC: 18 packages ok, only F8's
+  `internal/telemetry` failing, 0 `DATA RACE`) predate the edits of 2026-11-18 below and do not meet the gate for them.
+
+### 2026-11-18, the review's findings and notes, staged, not committed
+
+- **Review.** No blocker; S1 and S2 should-fix; survivors as recorded in the MADR ("Independent review and the
+  decisions after it").
+- **S2.** Two tests in `store_close_recover_test.go`: a panic that is not the library's, at a site with no error result
+  (`updateOrWarn`), propagates with its own value past the bound
+  (`TestStore_Recovery_NonLibraryPanicAtSiteWithoutErrorResultPastTheBoundPropagates`) and within it
+  (`TestStore_Recovery_NonLibraryPanicAtSiteWithoutErrorResultWithinTheBoundPropagates`). Under the reviewer's plant
+  (a `recover()` that logs, in `Store.updateOrWarn`) both fail; see the plants below.
+- **S1.** The count and the test hook now live together in `countStart` (`bgWg.Add`, then the hook), which
+  `goBackground` calls while holding the gate's mutex. `TestStore_StartAdmittedBeforeCloseIsCountedFirst` checks, from
+  the hook, that the mutex is held (`TryLock` fails), deterministically and without `-race`; its comment says what it
+  proves. Limit: a plant that separates the `Add` from `countStart` (the old shape: the hook inside the mutex, the `Add`
+  after it) is again visible only under `-race`; it is listed below with what catches it.
+- **F11.** `Close`'s doc comment now says that if the teardown panics the once is spent and a later call returns nil
+  while Badger stays open.
+- **Docs (N4).** The guide's list of what can be lost at shutdown now also names a refused intelligence record or synced
+  batch of tool records, the last learned-weight updates and a prompt-cache entry, and says the base lost the same writes
+  to the library's closed-database error.
+- **A run cut short.** The first plant run of this pass was stopped by a pause (the owner's usage quota) after two or
+  three plants, with no summary; nothing from it counts. It was run again in full.
+- **Plants, in full on this pass's code** (28: the 20 of P4, the six of the fourth ruling with the counting plant in
+  its new form, and two from the review). 27 failed a named test with a test failure:
+
+| Plant | Fails (first) |
+| :--- | :--- |
+| a `recover()` that logs in `Store.updateOrWarn` (the review's "noerror-site-swallows-panic") | `TestStore_Recovery_NonLibraryPanicAtSiteWithoutErrorResultPastTheBoundPropagates` and `…WithinTheBoundPropagates`, `store_close_recover_test.go:235` ("the panic did not propagate: the write returned <nil>") |
+| the gate's mutex released before `countStart` | `TestStore_StartAdmittedBeforeCloseIsCountedFirst`, `store_close_starts_test.go:121` ("a background start was counted in bgWg outside the gate's mutex"), without `-race` |
+| `bgWg.Add` split from `countStart` and moved after the mutex, the hook left inside (the review's "add-outside-mutex" in its original shape) | survives without `-race`; under `-race`, `-count=20`, `TestStore_StartAdmittedBeforeCloseIsCountedFirst` fails with "race detected during execution of test" (1 `DATA RACE`) |
+
+  The other 25 fail as recorded above (P4 and the fourth ruling); the counting plant's line moved to `:121`. Why the
+  split plant cannot be caught without `-race`: with the hook left inside the mutex and the `Add` after it, the only
+  difference is the order of an `Add` and an `Unlock` a few instructions apart, with no seam between them; a
+  deterministic check needs the check to travel with the `Add`, which is what `countStart` does.
+
+| Gate (safe packages only) | Start (UTC) | End (UTC) | Exit | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| `gofmt -l` on the twelve changed Go files | 2026-11-18T18:25:56Z | 2026-11-18T18:25:56Z | 0 | |
+| `go vet ./internal/db/ ./internal/handler/` | 2026-11-18T18:25:56Z | 2026-11-18T18:25:57Z | 0 | |
+| `make lint`, golangci-lint v2.13.1 built with Go 1.26.6 | 2026-11-18T18:25:57Z | 2026-11-18T18:26:37Z | 0 | 0 issues |
+| `make lint`, golangci-lint v2.15.0 built with Go 1.26.6 | 2026-11-18T18:26:37Z | 2026-11-18T18:26:48Z | 2 | 2 issues, both on `3443524` and in other plans' files: `list_tools_handler.go:19:1` gocognit, `pipeline_tools.go:161:33` gocritic |
+| `go test -race -count=20 -timeout 30m ./internal/db/...` | 2026-11-18T18:26:48Z | 2026-11-18T19:00:31Z | 0 | 0 `DATA RACE`; start includes the queue wait |
+| `go test -race -count=20 -timeout 30m ./internal/handler/...` | 2026-11-18T19:00:31Z | 2026-11-18T19:09:34Z | 0 | 0 `DATA RACE` |
+
+- `check_records` and `markdownlint` were run on the final records, with this entry in place: exit 0 both.
+- Not run, by the owner's ruling: the whole module and `./internal/client/...`. Owed: the whole-module gate (the
+  deviation above). Cross-builds were not among this pass's gates.
+- Staged by path, not committed: the same 15 paths.

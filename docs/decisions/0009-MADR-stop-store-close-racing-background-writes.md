@@ -50,6 +50,141 @@ the work proceeds. Nothing above this heading changes. Each answer is the option
 **The commit rule.** The owner makes every commit and push, from the coordinator's staged list. Agents and the
 coordinator stage by path and do not commit.
 
+*Annotation, 2026-11-17 (evening):* the owner restored the coordinator's commits and pushes to the default branch.
+Agents still stage by path and do not commit; the rule above stood until then.
+
+### Decided, third ruling: a write that outlived the close wait (the owner, 2026-11-17, relayed by the coordinator; the label quoted only as a label)
+
+An addition of 2026-11-17, made during P2. Nothing above this heading changes.
+
+**The stop.** Building the gate, the P2 agent asked whether a write admitted before closing and still running when
+`Close`'s five-second wait runs out can panic once `Close` has closed Badger. It can. P2 stopped and put three options
+to the owner before building anything.
+
+**The evidence** (badger/v4 v4.9.1 module source, read; scratch runs on `3443524`, the commit of this record pair,
+with the investigator's counter-gate prototype and its wait shortened to 200 ms):
+
+* **The iterator path, deterministic.** `txn.NewIterator` panics with `badger.ErrDBClosed` on a closed database
+  (`badger/v4@v4.9.1/iterator.go:463-464`). A write parked inside its transaction function until `Close` had returned,
+  then let go on: opening an iterator panicked `DB Closed` in 3 of 3 runs; `txn.Get` returned the error `DB Closed`;
+  `txn.Set` and commit returned `Writes are blocked, possibly due to DropAll or Close` (`demo_pastbound.log`, scratch).
+  Three gated write paths open an iterator inside their transaction: `PurgeStaleServerTools`, `PruneOrphanedIntelligence`
+  and `PurgeServerIntelligence` (`internal/db/badger.go:1703`, `:1880`, `:1924`). The third is reached from the orphan
+  sweep, a bare goroutine with no `recover` (`internal/client/sync_manager.go:70-78`).
+* **The commit window, narrow.** A commit that passes the `blockWrites` check (`badger/v4@v4.9.1/db.go:884`) before
+  `DB.Close` sets it (`:538`) and sends (`:904`) after `close(db.writeCh)` (`:550`) panics with "send on closed channel".
+* Nothing bounds either except recovery: the pool recovers its tasks (`internal/handler/background_pool.go:37-44`); the
+  bare goroutines of E13 do not (F4).
+
+**The ruling.** "Catch a panic only in a write that outlived the wait (Recommended)". As put to the owner: every gated
+write ends through one small deferred check; if the wait had already timed out, a panic from the closed database
+becomes the "store closing" error with a logged warning; any other panic is re-raised unchanged; it covers every
+caller, bare goroutines included; a write hung inside the library stays blocked until the process exits; it costs a
+deferred call per write and an amendment to the record.
+
+**How it sits with the earlier rulings.**
+
+* Q3 ("Five seconds, then a warning and close"): unchanged. `Close` still waits at most five seconds, warns and closes;
+  the recovery acts only on a write that outlived that wait.
+* The PLAN's Rollback note forbids catching the panic in the writers *instead of* the gate. This recovery is *in
+  addition to* the gate: the gate keeps every write admitted before the wait ran out off the closed database, and the
+  recovery acts only past the bound. It never replaces the gate.
+* The decision driver "No crash and no hang ... it never panics" is made precise: no panic that the closed database
+  raises in a gated write reaches that write's caller. A write that blocks inside the library after the close is not
+  covered: its goroutine stays blocked until the process exits, and `Close` has already returned.
+
+**What "a panic from the closed database" means in the change.** The deferred check converts a panic only when all
+of these hold: `Close`'s wait ran out with writes in flight (the gate records it); Badger reports itself closed
+(`DB.IsClosed`); and the panic was raised inside Badger, that is, the first frame below the runtime's panic frames
+belongs to `github.com/dgraph-io/badger/v4`. That last test is by the panic's origin, not its value alone: the value
+`badger.ErrDBClosed` identifies the iterator path, but "send on closed channel" is a runtime error any code can raise,
+and only its origin (`badger/v4.(*DB).sendToWriteCh`) tells it apart. Every admitted write was admitted before closing,
+by construction. A panic that fails any test is not recovered at all, so it propagates with its own value and stack;
+nothing is re-raised.
+
+**A late write that does not panic.** A write that outlived the wait and then calls into the closed database without
+a panic gets the library's own error ("DB Closed" or "Writes are blocked ..."), not `ErrStoreClosing`. The ruling covers
+panics only; this is recorded, not changed.
+
+### Decided, fourth ruling: the store's own goroutine starts go through the gate (the owner, 2026-11-17, relayed by the coordinator; the label quoted only as a label)
+
+An addition of 2026-11-17, made after P2. Nothing above this heading changes.
+
+**The finding (F9).** Four places start one of the store's own goroutines with `bgWg.Add` or `bgWg.Go` and nothing
+orders them against `Close`'s `bgWg.Wait()`: `RecordSynergy`'s flush (`internal/db/badger.go:234` at `3443524`), the
+re-index after `SaveIntelligence` (`:917`), the L2 response-cache write (`internal/db/cache.go:234`) and the refresh
+after a metrics flush (`internal/db/metrics_flush_helpers.go:130`). A start counted while `Wait` is returning makes
+`Close` panic with `sync: WaitGroup is reused before previous Wait has returned`; a start counted after `Wait` has
+returned runs against a closed store.
+
+**The evidence.** A handler-level probe with `RecordSynergy` running against `Close` panicked in 2 of 3 runs of 100
+iterations on `3443524`, and in 3 of 3 on the change as first staged (R14). A store-level test that keeps all four
+sites starting while `Close` runs at a random point, `TestStore_CloseWhileStoreGoroutinesStart` (100 iterations per
+run), on the change as first staged: 10 runs of 10 failed, `Close panicked: sync: WaitGroup is reused before previous
+Wait has returned`, at iterations 0 to 43 (10 panics in 135 iterations, about one in 14).
+
+**The ruling.** "In 0009, by amendment: those four starts go through the gate (Recommended)". As put to the owner: each
+of the four sites asks the gate before starting its goroutine, so none can start once `Close` has begun; four sites,
+one test seen failing first, the gates re-run, then the independent review covers the whole change once; the record's
+claim (shutdown no longer panics) becomes true.
+
+**The change.** Each of the four sites starts its goroutine through `Store.goBackground`. It takes the gate's mutex,
+refuses the start if the gate is shut, and otherwise calls `bgWg.Add(1)` before it releases the mutex.
+
+**The ordering argument.** `Close` shuts the gate (sets the closed flag under the gate's mutex) as its first step, and
+reaches `bgWg.Wait()` only later, in the same goroutine. A start checks the flag and calls `bgWg.Add(1)` while holding
+the same mutex. So every `Add` that happens at all happens inside a critical section that precedes the one in which
+`Close` sets the flag, and therefore precedes `Wait`; every start whose critical section comes after sees the flag and
+does not `Add`. A start admitted in the instant before the gate shuts holds the mutex until its `Add` is done, so the
+gate cannot shut, and `Wait` cannot run, until that start is counted. No `Add` can follow the `Wait`.
+
+**The drain.** These goroutines are not admitted writes: they are not counted in the five-second drain, and `Close`
+waits for them through `bgWg.Wait`, without a bound, as before. Their own writes go through the gate like any other
+write, so after the gate shuts those writes are refused at once and the goroutines finish quickly.
+
+**What a refused start drops.** Nothing that a caller was told had been stored:
+
+* `RecordSynergy`'s flush: the in-memory weights are already updated; the disk copy misses the last increments, and the
+  next start seeds the weights from disk without them. `RecordSynergy` returns nothing.
+* The re-index after `SaveIntelligence`: the intelligence is saved (that write was admitted and returned nil); the search
+  index keeps the tool's old fields. The next start does not repair it: its drift check compares counts, not contents.
+  The entry is refreshed the next time that tool is re-indexed (its next intelligence or tool save, a sync, or a full
+  re-index).
+* The L2 response-cache write: the persistent copy of a cached response is not written; the in-memory copy is unaffected
+  and the persistent cache misses that entry after a restart.
+* The refresh after a metrics flush: the metrics are already flushed; the index keeps the tool's old figures until the
+  tool is next re-indexed, and the explicit `Sync` is skipped (Badger's own close flushes).
+
+The first refused start of a store logs one line at info level naming the work; later ones are silent.
+
+**Other users of the same machinery.** `startBackgroundReindexIfNeeded` (`internal/db/gc_helpers.go:91`) also uses
+`bgWg.Go`, but only from `NewStore`, before the store is returned to any caller, so it precedes every `Close`. The
+`closing` channel is closed once (`Close` is idempotent); `cancel` is idempotent; the gate is under its mutex. Not
+covered here and recorded as F11: `WipeAll` and `WipeDatabase` replace `s.Index` after their `DropAll`, outside the
+gate, so a wipe running while `Close` closes the index can race on that pointer. A wipe runs only from the CLI's
+`db wipe` (`WipeDatabase` has no caller outside tests), not at shutdown.
+
+### Independent review and the decisions after it (2026-11-18, by addition)
+
+An addition of 2026-11-18. Nothing above this heading changes.
+
+* **The review.** An independent reviewer reviewed the staged change (15 paths at `3443524`): no blocker; 41 plants; the
+  WaitGroup panic of F9 reproduced on the base and gone on the change; the real `Stop` driven in process, 1 panic in 16
+  on the base and 0 in 16 after; the benchmark reproduced. Two should-fix findings. **S1:** the plant that moves
+  `bgWg.Add` outside the gate's mutex survived every test without `-race` and was caught only under `-race`. **S2:** no
+  test caught `Store.updateOrWarn` swallowing a panic that is not the library's. Survivors, verbatim:
+  "add-outside-mutex: survives without `-race`", "noerror-site-swallows-panic: survives",
+  "close-signals-goroutines-before-drain: survives" (informational: no record claims that ordering). S1 and S2 are
+  answered in the PLAN's entry of 2026-11-18.
+* **F10, the coordinator's decision (the owner told):** accepted as recorded (see F10).
+* **F11, the owner's ruling (2026-11-18; the label quoted only as a label):** "Accept it here and record the panic; fix
+  it with the raw-handle follow-up (Recommended)" (see F11).
+* **A restriction on test runs (the owner's ruling, 2026-11-18; the label quoted only as a label):** "Fix the hazard
+  first, under its own short record; until then run only the safe packages here (Recommended)". Three tests in
+  `internal/client` run the orphan reaper for real and can kill the owner's live sub-servers. Until that record's fix
+  lands, only `./internal/db/...`, `./internal/handler/...` and `./cmd/...` run on this machine. The whole-module gate
+  of Confirmation item 5 is owed (PLAN, deviation of 2026-11-18).
+
 ### The answer in one paragraph
 
 It is both a test defect and a product defect. The test closes a store while a background save the test itself started
@@ -101,6 +236,15 @@ The other plan's agent reported the following; they were claims until checked.
   measured without the detector (R5), and the tests it adds pin its cause.
 * **A third set of runs.** An independent reviewer is running the gate on `5e8821e`; its result will be added here by
   annotation. (2026-11-17: pending.)
+  *Annotation, 2026-11-17:* the third source. The independent reviewer of record 0008 ran the whole-package handler
+  race gate three times on `5e8821e` and three times on the 0008 tree: six green of six, and could not reproduce the
+  race; its own probe saw about 20,000 writes during close refused cleanly, with no panic. So the counts stand at: red
+  twice (the 0008 author), green five of five (the investigator, `5e8821e`), green six of six (that reviewer), and green
+  five of five on this record's change (P6). The rate is not established, and the decision does not rest on it.
+  *A further line, 2026-11-18:* the handler race gate on this record's change has now run 16 times, 16 green: P6 twice
+  (10 of 10), the independent reviewer of this change 3, the coordinator 3. Against: red twice (the 0008 author), and on
+  the base green 5 of 5 (the investigator) and 6 of 6 (the 0008 reviewer). The rate is still not established; the
+  decision does not rest on it.
 
 ### Evidence index
 
@@ -128,6 +272,7 @@ measurement in a scratch copy (R-rows, More Information).
 | E17 | No record or comment says why the save is off the request path; the pool's comment says only that a `go` per call used to pile up; history is one squashed commit (`6e65cdb`) | `internal/handler/background_pool.go:8-12` | read |
 | E18 | Reads through a raw handle outside the store: `viewOrWarn(store.DB, ...)` | `internal/intelligence/hydrator.go:112`, `:262`; `internal/intelligence/hydrator_sweep_helpers.go:44` | read |
 | E19 | Closures passed to the store's update entry points call no other update entry point, so a gate held across one write cannot nest | `scan_closures.txt`, scratch | run (R10) |
+| E19, annotated 2026-11-18 | E19 holds for store calls only. In production the global logger routes every `slog` record to `Store.SaveLog` (`internal/logging/logging.go:108`, `:134-141`), a gated write, so every `slog` call inside an admitted write's closure is a nested admission: directly in `PurgeStaleServerTools` (three, from `internal/db/badger.go:1703` at `3443524`), `PruneOrphanedIntelligence` (`:1880`), `PurgeServerIntelligence` (`:1924`) and `ReconcileMetrics` (`:2001`), and through the `...OrWarn` helpers, which log on error. The counter makes it harmless: a nested admission is admitted or refused at once, never blocked (`TestStore_NestedAdmissionCannotDeadlockClose`); a read-write lock would have deadlocked against a waiting `Close` | `internal/logging/logging.go`; `internal/db/badger.go` | read |
 | E20 | Tests: 31 call sites of `newTestHandler`, 30 `defer store.Close()` lines, seven test files that reach a pool-using path; `t.Cleanup` functions run after the deferred calls of the test body, so a cleanup registered by `newTestHandler` would run after `store.Close()` | `internal/handler/common_test.go:13-45`; `internal/handler/*_test.go` | read |
 | R1 | Baseline: the whole-package gate on `5e8821e`, every run | More Information, `results/baseline.*`, scratch | run |
 | R2 | Forced-overlap tests under `-race` on `5e8821e` | `results/det-head-*`, scratch | run |
@@ -141,6 +286,13 @@ measurement in a scratch copy (R-rows, More Information).
 | R10 | The nesting scan | `results/scan_closures.txt`, scratch | run |
 | R11 | The new store tests on `5e8821e` (with a one-line stub for the new identifier) and on the prototype; the planted breaks | `results/T_on_head.txt`, `results/T_on_protoA.txt`, `results/T1_refused.txt`, `results/plants_A.txt`, scratch | run |
 | R12 | The read probe: four readers against `Close`, 200 iterations | `results/probe_read_head.txt`, scratch | run |
+| E21 | Considered, left ungated: `RunValueLogGC` also writes through Badger (value-log GC rewrites live entries through `batchSet`, which sends on `db.writeCh`); Badger orders it against its own `Close` (`waitOnGC` takes the GC slot before `Close` goes on), and the GC loop runs in the errgroup that `Stop` waits for before `Store.Close` | `internal/db/gc_helpers.go:39`; `badger/v4@v4.9.1/value.go:234`, `:316`, `:1066-1074`; `badger/v4@v4.9.1/db.go:542-544` | read |
+| E21, annotated 2026-11-18 | Also considered, left ungated: `DB.Sync()` (`syncOrWarn`), a write API missing from E21 above. It runs only inside the post-flush refresh, a `goBackground` goroutine that `Close`'s `bgWg.Wait` orders before Badger closes, so it cannot meet a closed database | `internal/db/io_helpers.go:80`; `internal/db/metrics_flush_helpers.go:134` | read |
+| E22 | Considered, left ungated: the index writes go to bleve, which refuses a closed index under its own mutex (`ErrorIndexClosed`), with no panic and no race | `internal/db/index.go:516`, `:524`, `:568`, `:701`, `:729`, `:742`; `bleve/v2@v2.6.0/index_impl.go:318-326`, `:409-417`, `:429-434`, `:1336-1342` | read |
+| E23 | On a closed database `txn.NewIterator` panics with `badger.ErrDBClosed`; `txn.Get` and a commit return errors | `badger/v4@v4.9.1/iterator.go:463-464`; `badger/v4@v4.9.1/db.go:749-752`, `:883-886` | read, run (R13) |
+| E24 | Four store paths call `bgWg.Add` or `bgWg.Go` with nothing ordering them against `Close`'s `bgWg.Wait` (F9) | `internal/db/badger.go:234`, `:917`, `:564`; `internal/db/cache.go:234`; `internal/db/metrics_flush_helpers.go:130` | read, run (R14) |
+| R13 | The write that outlived the close wait, on the prototype: iterator, `Get`, commit | `demo_pastbound.log`, scratch of P2 | run |
+| R14 | The handler-level shutdown probe (P2): pool tasks, bare-goroutine flushes, synergy records and usage counts against `Close`, on `3443524` and on the change | `hprobe-*.log`, scratch of P2 | run |
 
 ### The race, as reported (R3)
 
@@ -275,6 +427,36 @@ process, but only while it is shutting down. A store that will not reopen after 
   flusher of E13 again: `StartMetricsFlusher` starts a goroutine that ranges over a package-level queue for ever
   (`internal/telemetry/proxy_metrics.go:56-78`), so the first round's goroutine, holding the first round's `save`
   function, can take the second round's event. The cause of the first was not examined. On `5e8821e`, `go test -race -count=3 ./internal/telemetry/` exits 1 with failing tests TestProxyMetrics, TestProxyRelayTracker, and `-count=1` exits 0, so the failures are older than the prototype and independent of it.
+* **F9. `Close` can panic on its own WaitGroup (added 2026-11-17, during P2; not fixed here).** `RecordSynergy`
+  (`internal/db/badger.go:234`), the async re-index in `SaveIntelligence` (`:917`), the L2 response-cache write
+  (`internal/db/cache.go:234`) and the post-flush refresh (`internal/db/metrics_flush_helpers.go:130`) call
+  `bgWg.Add` or `bgWg.Go` with nothing ordering them against `Close`'s `bgWg.Wait()` (`internal/db/badger.go:564`).
+  A handler-level probe (R14) that keeps `RecordSynergy` running while `Close` runs panicked with `sync: WaitGroup is
+  reused before previous Wait has returned` inside `Store.Close` in 2 of 3 runs of 100 iterations on `3443524` (the
+  third run ended with a pool worker that never returned, the hung writer of R5), and in 3 of 3 runs of 100 iterations
+  on the change. It is not a write and not in the 18 sites; the gate neither causes nor fixes it. Put to the owner.
+  *Annotation, 2026-11-17:* fixed in this record by the fourth ruling ("Decided, fourth ruling" under Context): the four
+  starts go through the gate.
+* **F10. A write that outlived the close wait and meets the closed database without a panic gets the library's error**
+  ("DB Closed" or "Writes are blocked, possibly due to DropAll or Close"), not `ErrStoreClosing`: the third ruling
+  converts panics only. Measured on the change with the wait cut to 1 ns (P2): 164 such errors in 2400 iterations.
+  *Annotation, 2026-11-18 (the coordinator's decision; the owner told):* accepted as recorded. The independent reviewer
+  checked that no caller branches on `ErrStoreClosing`, and judged that the second ruling's "named error" governs the
+  refusal of a write that starts after `Close` has begun, while the third ruling covers panics only; a late write that
+  gets an error from the closed database keeps the library's error.
+* **F11. A wipe can race `Close` on the index pointer (added 2026-11-17; not fixed here).** `WipeAll` and `WipeDatabase`
+  (`internal/db/badger.go:2472-2501`, `:2520-2543` at `3443524`; the assignments at `:2494`, `:2535`) replace `s.Index` after their `DropAll`, outside the
+  gate, while `Close` closes `s.Index`. `WipeAll` runs only from the CLI's `db wipe` (`cmd/mcp-server-magictools/main.go:157`);
+  `WipeDatabase` has no caller outside tests. Not a shutdown path.
+  *Annotation, 2026-11-18 (the independent review; the owner's ruling "Accept it here and record the panic; fix it with
+  the raw-handle follow-up (Recommended)"):* F11 is worse than recorded above. A `WipeAll` concurrent with `Close` makes
+  `Close` panic with "close of closed channel" at `bleve/v2@v2.6.0/index/scorch/scorch.go:443` (`close(s.closeCh)`),
+  reached through `SearchIndex.Close` (`internal/db/index.go:763`) and `Store.shutdown` (`internal/db/badger.go:795` in
+  the change); the reviewer saw it with and without `-race`, on the first iteration. The close-once is then spent, so
+  Badger is never closed and a later `Close` returns nil (`Close`'s doc comment says so). It is not reachable in the
+  server: the only callers are the command-line `db wipe`, which runs by itself, and tests. Accepted here; it joins the
+  follow-up record for raw handles, with F3 (the prompt cache's writes through the raw database handle,
+  `internal/prompt_registry/cache.go:139`, `:158`).
 
 No other `DATA RACE` was reported by the whole-module run (R9): nothing else in the packages that have tests is waiting
 behind this one. The one package without test files, `internal/prompt_registry`, is not covered, and it holds the raw
@@ -287,6 +469,11 @@ handle of F3.
 * **No data lost or corrupted at shutdown.** Every write acknowledged before `Close` returns is readable after the
   directory is reopened; the store opens next time.
 * **No crash and no hang.** A write that meets shutdown returns an error; it never panics, and nothing waits for ever.
+  *Made precise by the third ruling (2026-11-17):* no panic that the closed database raises in a gated write reaches
+  that write's caller; a write that blocks inside the library after the close wait is not covered (its goroutine stays
+  blocked until the process exits).
+  *A further line, 2026-11-17 (fourth ruling):* nor does `Close` itself panic on the store's own goroutine starts: none
+  can start once `Close` has begun, and every start counted before is counted before `Close` waits (F9).
 * **No unbounded shutdown.** Whatever waits for in-flight work has a bound, and a task that never returns cannot hold
   the process.
 * **Smallest change that closes the product's window,** not only the test's.
@@ -405,6 +592,10 @@ defect in the packages that have tests.
 4. `go test -race -count=20 -timeout 30m ./internal/handler/...`, run the same number of times as the baseline
    (5), every run exit 0 with no `DATA RACE`.
 5. `go test -race -count=3 -timeout 40m ./...`, exit 0, or each failure named and shown to be outside this change.
+   *Annotation, 2026-11-18:* owed. The whole-module run is not allowed on this machine until the orphan-reaper hazard
+   is fixed under its own record (the owner's ruling, under "Independent review and the decisions after it"); it is run
+   after that fix lands. The earlier whole-module runs (P6, 2026-11-18 02:52-03:36 and 04:49-05:45 UTC) predate the
+   edits of 2026-11-18.
 6. `make lint` under golangci-lint v2.13.1 and v2.15.0, `go vet`, `gofmt`, per-file `golint`, `make check-records`,
    `make markdownlint`.
 7. An independent review of the diff before it is staged (the change alters shutdown).

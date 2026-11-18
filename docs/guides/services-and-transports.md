@@ -108,6 +108,28 @@ service state. The application budget is 30 seconds; generated systemd,
 launchd, and Windows service definitions allow 35 seconds before forced
 termination.
 
+The datastore is closed last. From the moment it starts closing it refuses
+every new write with the error `store closing` (`db.ErrStoreClosing`), and it
+waits up to five seconds for the writes it had already accepted. If any is
+still running after that, it logs a warning naming how many and closes anyway.
+A refused write returns that error, and its caller logs it and carries on:
+what is lost is a one-hour raw-output cache entry, a usage counter, a trace,
+a log line, a tool's intelligence record or a synced batch of tool records
+whose save was refused, the last learned-weight updates, or a prompt-cache
+entry (the prompt cache writes through the database handle directly, outside
+this gate). Before the gate, the same writes were lost to the database
+library's closed-database error. Only a write that outlived the wait can meet the closed database.
+It then gets the database library's own error, or, where the library panics,
+the `store closing` error in place of the panic, with one warning; the panic
+does not reach the caller. Such a write can also block inside the library, and
+then it stays blocked until the process exits. Reads are not gated: a read
+after the close gets the database library's own error, as before. The
+datastore's own background work (a learned-weight flush, a search re-index
+after an intelligence update, the persistent copy of a cached response, the
+index refresh after a metrics flush) is not started once closing has begun,
+and one info-level line says so; the close waits for the work that had
+already started.
+
 On Unix, the service definition uses `SIGHUP` as a reload signal. Configuration
 files also have file-system watches and a polling fallback, so ordinary edits do
 not require sending a signal.

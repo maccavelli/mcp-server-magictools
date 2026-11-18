@@ -127,7 +127,9 @@ func (s *Store) restoreLoadedMetrics(loaded map[string]*loadedMetric) {
 }
 
 func (s *Store) schedulePostFlushToolRefresh(loaded map[string]*loadedMetric) {
-	s.bgWg.Go(func() {
+	// Refused once the store is closing: the metrics are already flushed; the index keeps the old figures
+	// until the tool is next re-indexed.
+	s.goBackground("post-flush tool refresh", func() {
 		now := time.Now().UnixMilli()
 		if last := lastToolSync.Load(); now-last > 2000 {
 			if lastToolSync.CompareAndSwap(last, now) {
