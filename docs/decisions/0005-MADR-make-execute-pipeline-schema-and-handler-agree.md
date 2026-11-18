@@ -324,6 +324,15 @@ Marks: **read** (a line at the commit named), **run** (an experiment for this re
 | R8 | The designed schema and gate, 26 rows through two validators; a planted break | `agreement_table.txt`, `s2_schema.json`, scratch | run |
 | R9 | The atomic claim on a scratch Badger store; a planted break | `claim_prototype.txt`, scratch | run |
 
+**Annotation, 2026-11-17, added by 0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md.**
+The redesign of `ListToolsMiddleware` moved the code that row E11 and the sentence in the section on the schema's two
+union branches cite as `internal/handler/list_tools_handler.go:70-96`; those lines no longer hold the session merge.
+The same code is now in `internal/handler/list_tools_handler.go`: the session merge, `mergeSession`, at `:104-132`,
+with the session-id lookup, `listToolsSessionID`, at `:134-142`, and the static-inventory fallback, `staticInventory`,
+at `:80-102`; each range runs from the function's doc comment to its closing brace. What the rows say is unchanged: the
+middleware appends the session cache's tools to `tools/list` as the cache holds them, without sanitising, copying or
+capping them. The original cell and sentence are left as written.
+
 ## Decision Drivers
 
 * **A caller must be able to rely on the schema**: every schema-valid call does what the schema says, and no

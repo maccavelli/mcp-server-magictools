@@ -17,7 +17,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// Characterisation of ListToolsMiddleware: one subtest per row L01 to L21 of the
+// Characterisation of ListToolsMiddleware: one subtest per row L01 to L23 of the
 // behaviour table in docs/decisions/0008-MADR-redesign-the-list-tools-middleware-
 // under-the-complexity-limit.md, plus an end-to-end test over a real in-memory
 // session (row E-1). Written against the closure at 310a541; every row must keep
@@ -167,6 +167,8 @@ func TestListToolsCharacterization(t *testing.T) {
 		{"L19 a panic after next returned an error clears that error", lsRowL19},
 		{"L20 a request whose session is a typed nil pointer panics in ID() and is recovered", lsRowL20},
 		{"L21 the middleware writes nothing to the session cache", lsRowL21},
+		{"L22 next returns a typed nil list result: the nil dereference is recovered, not the fallback", lsRowL22},
+		{"L23 spare capacity in the base slice is used: session tools are appended into next's own array", lsRowL23},
 	}
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) { r.fn(t, e) })
@@ -456,6 +458,31 @@ func lsRowL17(t *testing.T, e *lsEnv) {
 	if !strings.Contains(out, "PANIC RECOVERY during tools/list") || !strings.Contains(out, "panic=\"test panic\"") || !strings.Contains(out, "stack=") {
 		t.Fatalf("log = %s", out)
 	}
+	// Exactly one recovery record, and it is an error record: a recovered panic must not be demoted to a warning,
+	// and must not be logged twice.
+	var recovery []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "PANIC RECOVERY during tools/list") {
+			recovery = append(recovery, line)
+		}
+	}
+	if len(recovery) != 1 {
+		t.Fatalf("want exactly one recovery record, got %d: %s", len(recovery), out)
+	}
+	if !strings.Contains(recovery[0], "level=ERROR") {
+		t.Fatalf("the recovery record is not at ERROR level: %s", recovery[0])
+	}
+	// Counted over the recovery records only: other goroutines of the package (the background pool) log through the
+	// same logger while this row runs, so a count of every ERROR record could fail on their records.
+	errors := 0
+	for _, line := range recovery {
+		if strings.Contains(line, "level=ERROR") {
+			errors++
+		}
+	}
+	if errors != 1 {
+		t.Fatalf("want exactly one recovery record at ERROR level, got %d: %s", errors, out)
+	}
 }
 
 func lsRowL18(t *testing.T, e *lsEnv) {
@@ -496,6 +523,45 @@ func lsRowL20(t *testing.T, e *lsEnv) {
 	res, err := lsList(t, h.ListToolsMiddleware(lsNext([]*mcp.Tool{lsTool("a")})), req)
 	if err != nil || res == nil || len(res.Tools) != 0 {
 		t.Fatalf("res=%+v err=%v", res, err)
+	}
+}
+
+// L23 documents an implementation detail, not a contract. When the base result has spare capacity, the session
+// tools are appended into that same backing array, past the base length. No client can observe it (the SDK builds a
+// new slice for every call), and a later change may remove the aliasing, for example by copying the base slice as
+// a defensive measure, and this row with it, without a decision record.
+func lsRowL23(t *testing.T, e *lsEnv) {
+	e.reset()
+	e.synced(true)
+	e.cache("active-session", 20, lsTool("s1"))
+	backing := make([]*mcp.Tool, 1, 4)
+	backing[0] = lsTool("a")
+	res, _ := lsList(t, e.h.ListToolsMiddleware(lsNext(backing)), nil)
+	lsEqualNames(t, res.Tools, "a", "s1")
+	if &res.Tools[0] != &backing[0] {
+		t.Fatal("the result no longer shares the base slice's backing array")
+	}
+	if got := backing[:2][1]; got == nil || got.Name != "s1" {
+		t.Fatalf("the session tool was not appended into the base array: %v", got)
+	}
+}
+
+func lsRowL22(t *testing.T, e *lsEnv) {
+	h := e.h
+	e.reset()
+	logs := captureLog(t)
+	before := telemetry.GetPanicCount()
+	var typedNil *mcp.ListToolsResult // a non-nil mcp.Result holding a nil pointer
+	mw := h.ListToolsMiddleware(func(context.Context, string, mcp.Request) (mcp.Result, error) { return typedNil, nil })
+	res, err := lsList(t, mw, nil)
+	if err != nil || res == nil || res.Tools == nil || len(res.Tools) != 0 {
+		t.Fatalf("res=%+v err=%v", res, err)
+	}
+	if telemetry.GetPanicCount() != before+1 {
+		t.Fatalf("panic counter %d -> %d: the nil dereference was not recovered", before, telemetry.GetPanicCount())
+	}
+	if strings.Contains(logs.String(), "falling back to static inventory") {
+		t.Fatalf("a typed nil result took the fallback: %s", logs.String())
 	}
 }
 
@@ -557,4 +623,39 @@ func TestListToolsOverInMemorySession(t *testing.T) {
 		t.Fatal(err)
 	}
 	lsEqualNames(t, res.Tools, "base_tool", "proxied:tool")
+}
+
+// F3 of the 0008 record: the static-inventory fallback reads h.InternalTools while
+// OnConfigReloaded replaces it under toolsMu. One writer and four listers on the
+// fallback path; meaningful under -race only. One writer, because concurrent
+// OnConfigReloaded calls race with each other in syncSearchGates, which is not what
+// this test asks.
+func TestListToolsFallbackWhileConfigReloads(t *testing.T) {
+	e := newLSEnv(t)
+	e.reset()
+	captureLog(t) // OnConfigReloaded and the fallback log at info and warn level
+	mw := e.h.ListToolsMiddleware(func(context.Context, string, mcp.Request) (mcp.Result, error) {
+		return nil, nil // nothing usable from the base layer: take the fallback
+	})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for range 50 {
+			e.h.OnConfigReloaded(e.h.Config)
+		}
+	}()
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				if _, err := mw(context.Background(), "tools/list", nil); err != nil {
+					t.Errorf("tools/list failed: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
 }

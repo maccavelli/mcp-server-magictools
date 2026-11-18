@@ -17,88 +17,128 @@ import (
 
 // ListToolsMiddleware intercepts 'tools/list' to provide robust recovery and aggregation.
 func (h *OrchestratorHandler) ListToolsMiddleware(next mcp.MethodHandler) mcp.MethodHandler {
-	return func(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
-		if method != "tools/list" {
-			return next(ctx, method, req)
-		}
+	return (&listToolsLayers{h: h, next: next}).handle
+}
 
-		// 🛡️ RECOVERY BLOCK: Prevent orchestrator crashes during tool listing.
-		defer func() {
-			if r := recover(); r != nil {
-				telemetry.RecordPanic()
-				slog.Error("orchestrator: PANIC RECOVERY during tools/list",
-					"panic", r,
-					"stack", string(debug.Stack()))
+// listToolsLayers is the tools/list middleware, one method per layer. It is built once, when the middleware is
+// wired, and holds only the handler and the next handler. It is never written after that, so concurrent calls
+// share it safely, and it must stay that way: everything that belongs to one call (the request, the tools gathered
+// so far) travels as an argument or a result, and nothing is kept between calls, because each call must read the
+// session cache afresh.
+type listToolsLayers struct {
+	h    *OrchestratorHandler
+	next mcp.MethodHandler
+}
 
-				if result == nil {
-					result = &mcp.ListToolsResult{
-						Tools: []*mcp.Tool{},
-					}
-				}
-				err = nil
-			}
-		}()
-
-		// 1. BASE LAYER: Start with high-fidelity internal tools from the SDK.
-		// These were registered via s.AddTool earlier and should be returned by the base handler.
-		slog.Log(ctx, util.LevelTrace, "orchestrator: invoking base tools/list handler")
-		baseRes, err := next(ctx, method, req)
-
-		var finalTools []*mcp.Tool
-		if err == nil {
-			if listRes, ok := baseRes.(*mcp.ListToolsResult); ok {
-				finalTools = listRes.Tools
-			}
-		}
-
-		// 🛡️ RECOVERY: If the base handler failed or returned nil, fallback to internal inventory directly.
-		if finalTools == nil {
-			slog.Warn("orchestrator: base tools/list failed; falling back to static inventory")
-			finalTools = make([]*mcp.Tool, 0, len(h.InternalTools)+20)
-			for _, it := range h.InternalTools {
-				if it == nil {
-					continue
-				}
-				finalTools = append(finalTools, &mcp.Tool{
-					Name:        it.Name,
-					Description: it.Description,
-					InputSchema: it.InputSchema,
-				})
-			}
-		}
-
-		// 2. DYNAMIC LAYER: Append aggregate tools from the ActiveSessions.
-		// 🛡️ LRU BOUNDING: Instead of dumping all tools from the Backplane, we only
-		// serve the recently discovered tools (max 20) to strictly cap the context window.
-		if !h.Registry.IsSynced.Load() {
-			slog.Log(ctx, util.LevelTrace, "orchestrator: backplane sync in progress; returning base layer only")
-		} else {
-			sessionID := "active-session"
-			if req != nil && req.GetSession() != nil {
-				sessionID = req.GetSession().ID()
-			}
-			if lruInterface, ok := h.ActiveSessions.Load(sessionID); ok {
-				lruCache := lruCacheFromAny(lruInterface)
-				lruTools := lruCache.Values()
-				seen := make(map[string]bool)
-				for _, t := range finalTools {
-					if t != nil {
-						seen[t.Name] = true
-					}
-				}
-				for _, t := range lruTools {
-					if t != nil && !seen[t.Name] {
-						finalTools = append(finalTools, t)
-						seen[t.Name] = true
-					}
-				}
-			}
-		}
-
-		return &mcp.ListToolsResult{
-			Tools: finalTools,
-		}, nil
+// handle is the method gate and the recover layer. Any method other than tools/list goes straight to next, with no
+// recover. For tools/list, whatever a layer below panics with, the client gets an empty list and no error: the
+// tools gathered before the panic are discarded with it.
+func (l *listToolsLayers) handle(ctx context.Context, method string, req mcp.Request) (result mcp.Result, err error) {
+	if method != "tools/list" {
+		return l.next(ctx, method, req)
 	}
+	defer func() {
+		if r := recover(); r != nil {
+			result, err = recoveredListTools(r), nil
+		}
+	}()
+
+	tools := l.base(ctx, method, req)
+	tools = l.mergeSession(ctx, req, tools)
+	return &mcp.ListToolsResult{Tools: tools}, nil
+}
+
+// recoveredListTools records a recovered panic and returns the empty list the client is given instead.
+func recoveredListTools(r any) mcp.Result {
+	telemetry.RecordPanic()
+	slog.Error("orchestrator: PANIC RECOVERY during tools/list",
+		"panic", r,
+		"stack", string(debug.Stack()))
+	return &mcp.ListToolsResult{Tools: []*mcp.Tool{}}
+}
+
+// base is the base layer: the high-fidelity internal tools the SDK registered with s.AddTool, as next returns them.
+// When next fails, or returns a nil result, a result of another type, or a *mcp.ListToolsResult whose Tools slice is
+// nil, the error is dropped and the static inventory is served instead. An empty, non-nil slice is a valid answer
+// and is kept. A typed nil *mcp.ListToolsResult is not caught here: reading its Tools panics, and the recover in
+// handle answers with the empty list, not the fallback. The base result's cursor and metadata are not carried over.
+func (l *listToolsLayers) base(ctx context.Context, method string, req mcp.Request) []*mcp.Tool {
+	slog.Log(ctx, util.LevelTrace, "orchestrator: invoking base tools/list handler")
+	var tools []*mcp.Tool
+	baseRes, err := l.next(ctx, method, req)
+	if err == nil {
+		if listRes, ok := baseRes.(*mcp.ListToolsResult); ok {
+			tools = listRes.Tools
+		}
+	}
+	if tools == nil {
+		tools = l.staticInventory()
+	}
+	return tools
+}
+
+// staticInventory is the fallback of the base layer: one tool per non-nil inventory entry, with its name,
+// description and input schema only. The schema is shared with the inventory, not copied and not sanitised
+// (registration sanitises it, this path does not). The inventory is replaced by OnConfigReloaded under toolsMu, so
+// it is read under the read lock, and only its slice header is copied under it: nothing is called while the lock
+// is held, so it cannot take part in a lock cycle.
+func (l *listToolsLayers) staticInventory() []*mcp.Tool {
+	slog.Warn("orchestrator: base tools/list failed; falling back to static inventory")
+	l.h.toolsMu.RLock()
+	inventory := l.h.InternalTools
+	l.h.toolsMu.RUnlock()
+	tools := make([]*mcp.Tool, 0, len(inventory)+20)
+	for _, it := range inventory {
+		if it == nil {
+			continue
+		}
+		tools = append(tools, &mcp.Tool{
+			Name:        it.Name,
+			Description: it.Description,
+			InputSchema: it.InputSchema,
+		})
+	}
+	return tools
+}
+
+// mergeSession is the dynamic layer. Once the backplane is synced it appends, after the given tools and in the
+// session cache's own order, the tools that session has discovered and cached that are not already listed by name.
+// It extends and returns the slice it is given, so callers must use the result. The tools are the cached values
+// themselves: they are not copied, re-sanitised or capped here (the bound is the cache's own capacity), and the
+// cache is only read. Before the sync completes only the base layer is served.
+func (l *listToolsLayers) mergeSession(ctx context.Context, req mcp.Request, tools []*mcp.Tool) []*mcp.Tool {
+	if !l.h.Registry.IsSynced.Load() {
+		slog.Log(ctx, util.LevelTrace, "orchestrator: backplane sync in progress; returning base layer only")
+		return tools
+	}
+	lruInterface, ok := l.h.ActiveSessions.Load(listToolsSessionID(req))
+	if !ok {
+		return tools
+	}
+	lruTools := lruCacheFromAny(lruInterface).Values()
+	seen := make(map[string]bool)
+	for _, t := range tools {
+		if t != nil {
+			seen[t.Name] = true
+		}
+	}
+	for _, t := range lruTools {
+		if t != nil && !seen[t.Name] {
+			tools = append(tools, t)
+			seen[t.Name] = true
+		}
+	}
+	return tools
+}
+
+// listToolsSessionID is the key of the session's tool cache: the request's session id as the SDK reports it, which
+// is empty over the stdio and in-memory transports, or active-session when the request carries no session at all.
+// An empty id is looked up as is, not mapped to active-session.
+func listToolsSessionID(req mcp.Request) string {
+	if req != nil && req.GetSession() != nil {
+		return req.GetSession().ID()
+	}
+	return "active-session"
 }
 
 // CallToolMiddleware intercepts 'tools/call' to correctly route namespaced tool calls.

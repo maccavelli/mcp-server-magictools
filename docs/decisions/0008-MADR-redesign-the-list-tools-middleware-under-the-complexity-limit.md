@@ -527,3 +527,49 @@ declined.
   That sentence is in a record this one does not edit.
 * **0007-MADR-install-the-fleet-agent-workspace.md** (accepted) moves `0001` to `0006` into `docs/decisions/`. This
   record is `0008`, because `0007` was taken when it was written, and lives in that directory with them.
+
+### Amendment, 2026-11-17: N3, the inventory reads in registration
+
+Added after the record was accepted. Nothing above this heading changes.
+
+* **The finding (the independent review's N3).** `Register`'s closing log line and `addTool`'s loop read
+  `h.InternalTools` without `toolsMu` (`internal/handler/handlers.go:197` and `:205` at `3443524`; the scratch trees
+  used for the measurements below carry one more comment line above them, so their numbers read `:198` and `:206`),
+  while the config
+  watcher, which replaces that slice under the lock in `OnConfigReloaded` (`handlers.go:146-148`), is already running:
+  it is started at `cmd/mcp-server-magictools/main.go:389` and `Register` is called at `:446`. It is the same class
+  as F3, at startup. Measured on a scratch copy, one `OnConfigReloaded` writer against `Register`, `-race -count=5`: 65
+  `DATA RACE` reports, all five runs failing, the first a write at `handlers.go:147` against a read at `handlers.go:206`
+  of that scratch tree (`:205` at `3443524`; `:147` is the same in both).
+* **The rulings (the owner, 2026-11-17, relayed by the coordinator; each label quoted only as a label).**
+  * The first label was "In 0008, by amendment: take the same lock in registration (Recommended)". As put: the same
+    lock on the same inventory in registration, a few lines, with a race test seen failing first, closing the class
+    while the code is open; the cost named was that 0008 touches two more functions than first approved. I had judged
+    it the owner's call, not mine, and it was put to them.
+  * Building it found that registration also writes: `util.SanitizeToolSchema` edits the inventory elements' schema
+    maps in place (`internal/util/schema_util.go:28`, `:49`, `:57`), and a reader of those maps concurrent with
+    registration races it (49 reports and a `fatal error: concurrent map iteration and map write` in a scratch test
+    that served while registering; a read lock on the slice cannot cover it). The work stopped and three options were
+    put. The second label was "The lock as ruled; document the map writes (Recommended)". As put: it fixes the live
+    race with no behaviour change; a doc comment states that registration writes the schema maps and is safe only
+    because it completes before serving; the in-place sanitising goes to the follow-up record that already covers the
+    fallback's schemas; the map race stays possible in principle and is unreachable in the binary.
+* **What is now in scope.** Two more functions, both in `internal/handler/handlers.go`: `Register`, whose closing log
+  line now reads the length of the inventory under the read lock, and `addTool`, which copies the slice header under
+  the read lock, iterates the copy, and releases before the SDK's `AddTool`. Their doc comments, and one test,
+  `TestRegisterWhileConfigReloads`, which serves no request while it registers. Behaviour is unchanged: the rows
+  L01 to L23, E-1, E-2 and the F3 test pass unchanged, and the `tools/list` wire output through `Register` is
+  byte-identical before and after the lock.
+* **Reachability of the schema-map writes (why the ruling's premise holds).** Registration runs once per process,
+  from `cmd/mcp-server-magictools/main.go:446`, before anything is served (`:452`, `:454`); the HTTP mode serves every
+  connection from the one server; nothing at request time calls `Register` or `addTool`. The readers of the inventory's
+  schema maps all run while a client request is handled: the tools/list fallback, `align_tools`, and the SDK itself,
+  because `Server.AddTool` keeps the tool and with it the same map (`go-sdk@v1.6.1/mcp/server.go:277`; its `remarshal`
+  at `:255` only checks a copy of it) and the SDK's `tools/list` appends that tool (`:738`) and marshals it on every
+  call. The config watcher's reload builds a fresh slice and never touches the old elements, and nothing started
+  before `Register` reads them.
+* **F3, now.** F3 means every unlocked read of the inventory slice that this record found: the fallback's (as first
+  recorded) and the two in registration (N3). The three readers in `align_tools` already took the lock.
+* **Named, found, documented, not fixed here.** The schema-map writes of registration. They are documented in the doc
+  comment of `addTool` (and of `Register`), with the reasons they cannot be reached in the binary, and are owned by the
+  F5 follow-up record together with N2, because sanitising a copy changes what the tools/list fallback emits.

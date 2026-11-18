@@ -158,9 +158,10 @@ func (h *OrchestratorHandler) OnConfigReloaded(cfg *config.Config) {
 		}
 	}
 
-	// Re-register tools with the server if possible?
-	// The SDK doesn't support re-registration easily without a central registry.
-	// But ListToolsMiddleware will use	_ = h.mgr.UpdateInternalTools(h.mcpserver)
+	// The tools already registered with the SDK server are not re-registered: the SDK has no
+	// easy way to replace them. The refreshed inventory reaches clients through the static
+	// inventory fallback of ListToolsMiddleware and through align_tools, which both read
+	// h.InternalTools; the base tools/list layer keeps serving what was registered at startup.
 
 	h.syncSearchGates()
 }
@@ -177,7 +178,8 @@ func (h *OrchestratorHandler) SetLogLevel(lv *slog.LevelVar) {
 	h.LogLevel = lv
 }
 
-// Register attaches tools and resources to the server
+// Register attaches tools and resources to the server. It must complete before the server serves any request:
+// registration writes into the inventory's schema maps (see addTool), and the readers of those maps are request handlers.
 func (h *OrchestratorHandler) Register(s *mcp.Server) {
 	h.Server = s
 	slog.Log(context.Background(), util.LevelTrace, "orchestrator: registering handlers and tools")
@@ -194,15 +196,36 @@ func (h *OrchestratorHandler) Register(s *mcp.Server) {
 	h.registerDiagnosticTools(s)
 	h.registerResources(s)
 
-	slog.Info("orchestrator: registration complete", "internal_tools", len(h.InternalTools))
+	h.toolsMu.RLock()
+	registered := len(h.InternalTools)
+	h.toolsMu.RUnlock()
+	slog.Info("orchestrator: registration complete", "internal_tools", registered)
 }
 
 // addTool wraps s.AddTool with schema sanitization to prevent SDK validation panics.
+//
+// It reads the static inventory under toolsMu, because the config watcher replaces it (OnConfigReloaded): the slice
+// header is copied under the read lock, the copy is iterated, and the lock is released before the loop and before
+// s.AddTool, so no lock is held across the SDK call.
+//
+// It also WRITES. util.SanitizeToolSchema edits the inventory element's schema map in place (it adds a missing type
+// or properties, and re-assigns every nested property), and the SDK is handed that same map. That is safe only
+// because registration completes before the server serves anything: every reader of those maps runs only while a
+// client request is being handled. That includes the SDK itself: Server.AddTool keeps the tool, and with it the
+// same inventory map (its own remarshal only checks a copy), and the SDK's tools/list marshals that map on every
+// call. The other readers are the tools/list fallback and align_tools. The config watcher's reload builds a
+// fresh slice from the inventory JSON and never touches the old elements; and nothing started before Register reads
+// them. A reader of the maps concurrent with registration would race with it. Sanitising a copy instead would remove
+// the write, and would change what the tools/list fallback emits; that is left to the follow-up record that owns the
+// fallback's schemas (docs/decisions/0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md, N2 and N3).
 func (h *OrchestratorHandler) addTool(s *mcp.Server, t *mcp.Tool, handler mcp.ToolHandler) {
 	// 🛡️ METADATA CONSOLIDATION: Prefer metadata from the static inventory if it exists.
 	// This ensures total adherence to the SDK-friendly schemas defined in inventory.go.
 	target := t
-	for _, it := range h.InternalTools {
+	h.toolsMu.RLock()
+	inventory := h.InternalTools
+	h.toolsMu.RUnlock()
+	for _, it := range inventory {
 		if it.Name == t.Name {
 			slog.Log(context.Background(), util.LevelTrace, "orchestrator: overriding registration metadata from static inventory", "tool", t.Name)
 			// Map InternalTool to mcp.Tool
