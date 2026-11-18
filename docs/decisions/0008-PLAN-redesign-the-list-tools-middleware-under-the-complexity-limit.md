@@ -1,6 +1,6 @@
 ---
-status: in-progress
-date: 2026-11-17
+status: implemented
+date: 2026-11-18
 associated-madr: "0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md"
 ---
 
@@ -799,3 +799,45 @@ Remaining, and not this plan's to do: the coordinator's commit of the seven stag
 it (criteria 2, 6 and 7), and the native CI jobs on a push. This repository's checker does not accept `complete` for a
 plan; the status that follows the commit is `implemented`, as record 0009's close-out found. The index row of
 `docs/README.md` needs no change until then.
+
+### 2026-11-18, committed and pushed as `1fe5ce7`; CI green; the close-out
+
+* **The commit.** `1fe5ce7`, "refactor(handler): split list-tools middleware under complexity limit", on `main`: the seven
+  files this plan staged, 787 insertions and 78 deletions: `internal/handler/list_tools_handler.go`,
+  `internal/handler/handlers.go`, `internal/handler/list_tools_characterization_test.go`,
+  `internal/handler/register_inventory_lock_test.go` (new), and the three records, the 0005 MADR (the dated annotation),
+  the 0008 MADR (the dated amendment) and this plan. It was committed and pushed by the coordinator, under the commit
+  and push authority the owner restored on the evening of 2026-11-17.
+* **The coordinator's own gate, before the commit,** on a copy of the index: on the session machine,
+  `./internal/db/...` and `./internal/handler/...` under `-race -count=20`, no race reported, and `go vet` of both; on
+  the Linux machine, after the read-only marker listing printed `no marked process and no magictools process on this
+  host`, the whole module under `go test -race -count=1`: 19 packages `ok`. These repeat, independently, the gates
+  recorded in the previous entry.
+* **CI on `1fe5ce7`:** the CI run succeeded, so the native jobs of the other platforms, which no run of this plan could
+  make, are green too.
+* **The completion criteria, one by one.**
+
+| Criterion | State | Where the evidence is recorded |
+| :--- | :--- | :--- |
+| 1. P1's tests exist, pass on `310a541`'s code and failed under every plant | met | the P1 entries (committed by the owner as `5e8821e`); the plants table of that entry |
+| 2. The redesign is committed; no function above 9; signature, registration and exported surface unchanged; no existing test file changed | met | `1fe5ce7`; the P2 entry (scores handle 3, base 4, staticInventory 3, mergeSession 9, listToolsSessionID 2, `CallToolMiddleware` untouched at 50); the surface and wire comparisons in the N3 and review entries; the three pre-existing test files are not among the commit's seven files |
+| 3. Every row passes unchanged on the redesign; every plant of P3 failed a named row | met | the P3 entry; the plants of the entry of 2026-11-18 on `bfcd269` (P02 to P29 and the registration-lock plants, survivors named) |
+| 4. `make lint` clean for `list_tools_*` under v2.13.1 (Go 1.26.6) and v2.15.0 (Go 1.26.6 and 1.27.4); race run and cross-builds pass | met | the gate table of the entry of 2026-11-18; the one v2.15.0 finding left in the module is record 0006's; the coordinator's gate and CI above |
+| 5. The independent reviews' findings are closed or put to the owner | met | the entries on the first review (S1, N1 to N6) and the second (N-a to N-d), each answered; the follow-ups below are the findings put to the owner as records still owed |
+| 6. The 0005 MADR's evidence row E11 points at the new location | met | the dated annotation in the 0005 MADR, in `1fe5ce7`, with the three ranges of `list_tools_handler.go` that follow one convention |
+| 7. The owner's word for each commit and push is on record; status `implemented`; execution record complete | met | the owner committed and pushed P0 and P1 themselves (`5e8821e`); the owner's approval of the whole plan and of its commits, and their restoring of the coordinator's commits and pushes, are recorded in the second Decided list of the MADR and the entries above, and `1fe5ce7` was made under it; this entry completes the execution record |
+
+* **Status.** Every criterion is met, so the status becomes `implemented` (this repository's record check does not accept
+  `complete` for a plan) and the date 2026-11-18. The MADR stays `accepted`. Nothing remains for this plan to do; what
+  follows is owed by later records.
+* **The follow-up records this plan names as owed.** None is drafted and none is fixed here; each is for the owner to
+  commission. For a later author, the evidence is recorded in the 0008 MADR (its findings, rows and amendment) and in
+  this plan, as follows. Line numbers are those of `1fe5ce7`.
+
+| Follow-up | What it is | The rows that change by intent, and the evidence |
+| :--- | :--- | :--- |
+| F1, the session-id lookup | `listToolsSessionID` looks the session cache up under `""`, which is what stdio and in-memory sessions report, while the handshake and `align_tools` store it under `active-session`; so over stdio no proxied tool reaches `tools/list` | rows L10, L11 and E-1; the MADR's F1 and its section on what 0005 relies on (point 4); `safeSessionID` at `internal/handler/proxy_handlers.go:92` already maps `""`; the SDK's `ioConn.SessionID` is `""` (`go-sdk@v1.6.1/mcp/transport.go:441`); fixing it adds 20 to 30 tools to every stdio client's list, and changes the seeding key of 0005's tests |
+| F2, the panic path | any panic in `tools/list`, including a typed-nil session or a wrong-typed cache, discards the tools already gathered and returns the empty list | rows L17, L18, L19, L20 and L22; `recoveredListTools`; the MADR's F2 |
+| F4, the dropped cursor and metadata | the result is a new object holding only `Tools`, so a base result's `NextCursor` and `Meta` are lost; latent while the base pages at 1000 tools and 18 are registered | row L16; the MADR's F4; `go-sdk@v1.6.1/mcp/server.go:36` |
+| F5, with N2 and the schema-map writes | the fallback emits name, description and schema only, and the schema is the inventory's own map, raw after a reload and sanitised for 2 of 18 tools after `Register` (16 of 18 raw, then 18 of 18 after `OnConfigReloaded`); registration's `SanitizeToolSchema` writes into those maps in place (`internal/util/schema_util.go:28`, `:49`, `:57`), which is safe only because registration finishes before serving (the doc comment of `addTool`); sanitising a copy would remove the write and make the fallback emit all 18 raw | rows L12 and L13 (and E-2 for the base path); the MADR's F5, the N2 and N3 notes and its amendment; a scratch test that served during registration gave 49 reports and a `concurrent map iteration and map write` fatal error |
+| the config-reload race on the search gates, with overlapping reloads | `syncSearchGates` assigns `h.Store.SearchGates` and `h.Store.Fusion` as plain fields (`internal/handler/handlers.go:105`, `:111`) while searches read them unlocked (`internal/db/search_fusion_helpers.go:40`, `:263`, `:296-297`, `:346-352`, `:397`; `internal/handler/pipeline_swarm_helpers.go:70`); and `handleChange` (`internal/config/watcher.go:174`) is called from three places (`:69`, `:97`, `:111`) and holds its lock only around the hash check, so two reloads can overlap | not touched by this change and held by no row; shown under `-race` by the review with one writer, and seen in this plan's first probe when `OnConfigReloaded` was called concurrently (which is why the registration and fallback race tests use one writer) |
