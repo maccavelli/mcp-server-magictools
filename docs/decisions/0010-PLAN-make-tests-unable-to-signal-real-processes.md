@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 date: 2026-11-18
 associated-madr: "0010-MADR-make-tests-unable-to-signal-real-processes.md"
 ---
@@ -1344,3 +1344,68 @@ not yet enforceable: constructor absent
   | 6 | P9 passed with every decoy alive and the panic seen | met |
   | 7 | docs steps done; no interim rule in `CLAUDE.md`; records and markdownlint pass | met |
   | 8 | records staged; status `complete` only after the commit | not yet: the coordinator stages and commits |
+
+### 2026-11-19, closed: committed, pushed and green in CI; status `implemented`
+
+* **Commit authority.** The owner changed it on 2026-11-19, in these words: "you stage then let me know where and when
+  to commit and push". The coordinator no longer commits or pushes; the owner does, on the coordinator's word. That is
+  why the commits below are the owner's, and why this close-out is staged and not committed.
+* **The coordinator's gate on the final tree** (47 entries, after P10).
+  * On scratch copies on the macOS machine:
+    * `go build ./...`: 0.
+    * `go vet ./...` for darwin, linux and windows: 0.
+    * golangci-lint v2.15.0 for darwin and linux: 0 issues. Windows has 28, all in five files this record does not
+      touch: `service_windows.go` 16, `cleanup_windows.go` 6, `filelock_windows.go` 3, `init_windows.go` 2,
+      `io_helpers.go` 1. CI does not lint Windows.
+    * gofmt: clean. `go mod tidy -diff`: 0. The record check `--check-all`: 0. The parse-only guard test: 0.
+    * No identifier in the whole change.
+  * On the Linux machine, after the listing ("no marked process and no magictools process on this host") and with pid
+    999999 not alive: `go test -race -count=1 -timeout 40m ./...` exit 0, 21 packages `ok`.
+  * The coordinator's own slip, recorded as the coordinator's: the gate's first Linux vet and lint steps ran with cgo
+    left on while cross-compiling on the macOS machine, and failed inside `runtime/cgo`. Re-run with
+    `CGO_ENABLED=0`, both exited 0.
+* **Each planned commit was checked as a tree by itself.** HEAD plus the records alone fails the record check:
+  `docs/README.md:57` links `guides/testing-and-process-safety.md`, which is in the main group. So the records were
+  committed last. HEAD plus P6, and HEAD plus P6 and P6a, vet and build clean.
+* **The owner's commits on `main`, in order.**
+  * `36656f0`: P6, the two `internal/db` test files.
+  * `8809c8e`: P6a, the UDP stop fix and its test.
+  * `7300c64`: the main change, 61 files.
+  * `943c7e1`: the two 0010 records and `docs/README.md`.
+
+  The coordinator compared the pushed tree with the tree its gate ran on: identical. The tree was clean after.
+* **CI on `943c7e1`**, run 44619523927, attempt 1: success.
+  * `Go (linux/amd64; build on tag)` ran 17 steps, `Go (windows/amd64)` 10 steps and `Go (darwin/arm64)` 10 steps. The
+    smoke job and the two publish jobs were skipped (no tag).
+  * The Windows job's test step was `go test ./...`, without `-v`. Its log, read with `gh run view --log` for that job,
+    shows both packages run, not cached:
+    `ok  github.com/maccavelli/mcp-server-magictools/internal/client  21.492s` and
+    `ok  github.com/maccavelli/mcp-server-magictools/internal/proctable  1.947s` (also `internal/db` 30.031s,
+    `internal/telemetry` 0.550s, `internal/testsafety` 0.696s).
+  * This is the first execution of this record's Windows code paths, and of `internal/proctable`'s tests on hosted
+    macOS and Windows runners.
+  * The log has no per-test lines. By the code, `TestOSTableEscalationKillsTermIgnoringChild` skips on Windows
+    (`internal/proctable/table_test.go:228-229`), and no other test of the package has a Windows skip. So the
+    package's `ok` means `TestOSTableChildRoundTrip` passed there: the environment read of its own child, the
+    wrong-token refusals, and `Signal` through `taskkill /T /F` of its own child.
+* **Still not verified on Windows:**
+  * whether `taskkill /T` follows stale parent pids, so that a tree kill could reach a process whose recorded parent
+    pid was reused;
+  * the escalation path (unix-only by design);
+  * the registry's own-child stop on Windows (`process_windows.go`), whose test is unix-only;
+  * any per-test outcome, since the log is not verbose.
+* **Completion criteria, checked against this evidence:**
+
+  | # | Criterion | Status |
+  | :--- | :--- | :--- |
+  | 1 | every phase done, or named as skipped by an owner's ruling | met: P0 to P11 done; the commits are the owner's under the changed authority |
+  | 2 | the guard seen red, now green, no skipped subtest | met: green in the gate and in CI on three platforms |
+  | 3 | the tests on the fake table; no real table in a test; R1 to R4 | met |
+  | 4 | the UDP stop test seen failing, then passing under `-race` | met: P6a, P9, and the gate's race run |
+  | 5 | P8's findings closed | met: the reviewer's confirmation |
+  | 6 | P9 passed with every decoy alive and the panic seen; the owner's confirmation recorded | met |
+  | 7 | docs steps done; no interim rule in `CLAUDE.md`; records and markdownlint pass | met |
+  | 8 | committed, then status set after the commit; the MADR's questions answered with labels | met by this close-out, after `943c7e1` and its green CI |
+
+* **Status.** This plan becomes `implemented`, this repository's value (its record check rejects `complete`), and its
+  `docs/README.md` row follows. The MADR stays `accepted`, as every closed pair here does.

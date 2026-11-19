@@ -34,7 +34,7 @@ This tree holds three kinds of document:
 | 0009 | MADR | [0009-MADR-stop-store-close-racing-background-writes.md](decisions/0009-MADR-stop-store-close-racing-background-writes.md) | accepted |
 | 0009 | PLAN | [0009-PLAN-stop-store-close-racing-background-writes.md](decisions/0009-PLAN-stop-store-close-racing-background-writes.md) | implemented |
 | 0010 | MADR | [0010-MADR-make-tests-unable-to-signal-real-processes.md](decisions/0010-MADR-make-tests-unable-to-signal-real-processes.md) | accepted |
-| 0010 | PLAN | [0010-PLAN-make-tests-unable-to-signal-real-processes.md](decisions/0010-PLAN-make-tests-unable-to-signal-real-processes.md) | in-progress |
+| 0010 | PLAN | [0010-PLAN-make-tests-unable-to-signal-real-processes.md](decisions/0010-PLAN-make-tests-unable-to-signal-real-processes.md) | implemented |
 | 0011 | MADR | [0011-MADR-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md](decisions/0011-MADR-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md) | accepted |
 | 0011 | PLAN | [0011-PLAN-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md](decisions/0011-PLAN-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md) | implemented |
 
