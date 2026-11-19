@@ -1,8 +1,9 @@
 // Package main: non-destructive regression tests for the service-hardening work.
 //
 // These exercise pure logic (template rendering, signal classification, state
-// serialization, helpers) without mutating the OS — the live install/uninstall
-// path stays behind the skip in service_extra_test.go.
+// serialization, helpers) without mutating the OS. No test exercises the live
+// install/uninstall path; the deleted service_extra_test.go never ran it either
+// (its test skipped first).
 package main
 
 import (

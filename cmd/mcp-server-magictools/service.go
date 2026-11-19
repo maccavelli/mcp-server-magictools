@@ -872,37 +872,6 @@ func cleanupServiceArtifacts() {
 	}
 }
 
-// killStaleProcess verifies and kills a stale service process by PID.
-// BUG-6: Sends SIGTERM first, waits up to 5s, then escalates to SIGKILL.
-func killStaleProcess(pid int) {
-	if pid <= 0 || !isProcessAlive(pid) {
-		return
-	}
-	fmt.Printf("  Stopping stale process PID %d (SIGTERM)...\n", pid)
-	p, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-
-	// Try graceful shutdown first
-	signalOrWarn(p, os.Interrupt)
-
-	// Poll for up to 5 seconds
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !isProcessAlive(pid) {
-			fmt.Printf("  Process %d exited gracefully\n", pid)
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-
-	// Escalate to SIGKILL
-	fmt.Printf("  Process %d did not exit; sending SIGKILL\n", pid)
-	signalOrWarn(p, os.Kill)
-	time.Sleep(500 * time.Millisecond)
-}
-
 // TEL-2: auditServiceEvent writes a timestamped audit record for service lifecycle events.
 func auditServiceEvent(action, binPath string, err error) {
 	auditDir := config.DefaultConfigDir()

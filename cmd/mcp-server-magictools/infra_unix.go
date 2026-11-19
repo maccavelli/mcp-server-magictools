@@ -5,16 +5,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
-
-	"github.com/maccavelli/mcp-server-magictools/internal/client"
-
-	"github.com/shirou/gopsutil/v4/process"
 )
 
 // makeSignalContext returns a context cancelled on SIGINT, SIGTERM, or SIGHUP.
@@ -71,64 +65,5 @@ func enforceResourceLimits() {
 		if err := syscall.Setrlimit(syscall.RLIMIT_NOFILE, &rLimit); err != nil {
 			slog.Error("resource: failed to set ulimit", "error", err)
 		}
-	}
-}
-
-// InitialProcessSweep kills orphaned sub-server processes from previous runs.
-func InitialProcessSweep() {
-	pids, err := process.Pids()
-	if err != nil {
-		return
-	}
-
-	myPid := safeInt32FromInt(os.Getpid())
-	myPpid := safeInt32FromInt(os.Getppid())
-
-	killed := 0
-	for _, pid := range pids {
-		if pid == myPid || pid == myPpid || pid <= 1 {
-			continue
-		}
-
-		p, err := process.NewProcess(pid)
-		if err != nil {
-			continue
-		}
-
-		env, err := p.Environ()
-		if err != nil {
-			continue
-		}
-
-		isOrphan := false
-		for _, e := range env {
-			if e == client.EnvManaged+"="+client.EnvManagedValue || strings.HasPrefix(e, "MAGIC_TOOLS_PEER_ID=") {
-				isOrphan = true
-				break
-			}
-		}
-
-		if isOrphan {
-			// 🛡️ MULTI-INSTANCE GUARD: Skip if parented by another live orchestrator
-			ppid, ppidErr := p.Ppid()
-			if ppidErr == nil && ppid > 1 && ppid != myPid && ppid != myPpid {
-				if parent, pErr := process.NewProcess(ppid); pErr == nil {
-					if pName, nErr := parent.Name(); nErr == nil && strings.Contains(pName, "magictools") {
-						continue
-					}
-				}
-			}
-			fmt.Fprintf(os.Stderr, "InitialSweep: reaping orphan %d\n", pid)
-			if err := syscall.Kill(-int(pid), syscall.SIGKILL); err != nil {
-				slog.Debug("failed to kill process group", "pid", pid, "error", err)
-			}
-			if err := syscall.Kill(int(pid), syscall.SIGKILL); err != nil {
-				slog.Debug("failed to kill process", "pid", pid, "error", err)
-			}
-			killed++
-		}
-	}
-	if killed > 0 {
-		fmt.Fprintf(os.Stderr, "InitialSweep: total orphaned processes reaped: %d\n", killed)
 	}
 }

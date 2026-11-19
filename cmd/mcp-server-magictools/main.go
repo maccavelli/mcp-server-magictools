@@ -34,6 +34,7 @@ import (
 	"github.com/maccavelli/mcp-server-magictools/internal/ipc"
 	"github.com/maccavelli/mcp-server-magictools/internal/llm"
 	"github.com/maccavelli/mcp-server-magictools/internal/logging"
+	"github.com/maccavelli/mcp-server-magictools/internal/proctable"
 	"github.com/maccavelli/mcp-server-magictools/internal/telemetry"
 	"github.com/maccavelli/mcp-server-magictools/internal/util"
 	"github.com/maccavelli/mcp-server-magictools/internal/vector"
@@ -125,18 +126,19 @@ func main() {
 		util.TraceFunc(ctx, "step", "enforceResourceLimits")
 		enforceResourceLimits()
 
-		// InitialProcessSweep runs here
-
 		app, err := NewOrchestratorApp(ctx, cancel, configPath, dbPath, logPath, logLevel, noOptimize, debugFlag, processStartTime)
 		if err != nil {
 			return err
 		}
 
-		// 🛡️ SINGLETON GATE: InitialProcessSweep runs AFTER AcquireLock (inside NewOrchestratorApp).
-		// In stdio mode, the DB flock ensures only one instance reaches this point.
-		// A second IDE window will fail on AcquireLock above and never sweep.
-		util.TraceFunc(ctx, "step", "InitialProcessSweep")
-		InitialProcessSweep()
+		// 🛡️ PROCESS TABLE: the one place the real process table is built (0010-MADR, D1/D2). The store is open and
+		// locked, so dbPath names this instance; PreDrive refuses to start a registry that has no table.
+		if err := app.reg.AttachProcessTable(proctable.NewOSProcessTable(), dbPath); err != nil {
+			return fmt.Errorf("process table: %w", err)
+		}
+
+		// 🛡️ ONE SWEEP: the start-up sweep (S5) is removed (0010-MADR, D6); PreDrive's PruneOrphans, after
+		// AcquireLock and with the process table attached, is the only orphan sweep.
 
 		if handled, preErr := app.PreDrive(false); handled {
 			return preErr
@@ -280,6 +282,11 @@ func NewOrchestratorApp(ctx context.Context, cancel context.CancelFunc, configPa
 
 // PreDrive prepares the registry state by pruning orphaned processes before orchestrator bootstrapping.
 func (app *OrchestratorApp) PreDrive(clearDB bool) (bool, error) {
+	// 🛡️ WIRING GATE: a registry without a process table neither reaps orphans nor enforces one process per
+	// sub-server name. Refuse to start rather than run that way silently (0010-MADR, D1).
+	if !app.reg.ProcessTableAttached() {
+		return true, errors.New("process table not wired: refusing to start without orphan reaping and single-instance enforcement")
+	}
 	util.TraceFunc(app.egCtx, "step", "PruneOrphans")
 	app.reg.PruneOrphans()
 

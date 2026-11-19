@@ -17,6 +17,19 @@ point. What exists today is described in
 [docs/architecture.md](docs/architecture.md). The record index is in
 [docs/README.md](docs/README.md).
 
+## A built binary beside the live service
+
+No test of this module can enumerate or signal a real process other than a child it started itself
+([record 0010](docs/decisions/0010-MADR-make-tests-unable-to-signal-real-processes.md)), so the module's tests,
+`go test ./...` included, may run on a machine that runs a live magictools service. What stays forbidden there:
+
+- **Never run a built binary of this module there**: not `make run`, not `serve`, not `go run`, not a bare run. Its
+  default database path is the live service's, and start-up's pid-file cleanup sends SIGTERM, then SIGKILL, to the pid
+  recorded there without checking what it is, until that cleanup's own record adds the check.
+- Never start, stop, signal or call the running service, or any process you did not start.
+
+Detail: [docs/guides/testing-and-process-safety.md](docs/guides/testing-and-process-safety.md).
+
 ## Dependencies
 
 The Go module and `go.sum` are already in the tree. No dependency may be

@@ -89,6 +89,18 @@ type WarmRegistry struct {
 
 	// OnPromptListChanged is triggered by sub-server prompt list_changed notifications
 	OnPromptListChanged func(serverName string)
+
+	// procs is the process table and owner identity, set once by AttachProcessTable. nil (the zero value, and what
+	// NewWarmRegistry leaves) means the registry enumerates nothing and signals nothing but its own children
+	// (0010-MADR-make-tests-unable-to-signal-real-processes.md, D1).
+	procs atomic.Pointer[tableBinding]
+	// clock times the escalation of a kill; nil is the wall clock. Tests set a fake.
+	clock Clock
+	// reapWG tracks the orphan reaper's escalations in flight, so tests can wait for them.
+	reapWG sync.WaitGroup
+	// childExits maps each child this registry started (*exec.Cmd) to a channel its Wait goroutine closes, then
+	// removes; stopOwnChild signals only a command it finds here with the channel open (0010-MADR, D3).
+	childExits sync.Map
 }
 
 // GetLLMTraces returns the last N entries from the HFSC_LLM_TRACE ring buffer.
@@ -249,6 +261,7 @@ func stripReservedWireKeys(arguments map[string]any) {
 	}
 }
 
+// CallProxy calls toolName on the sub-server serverName with arguments, within timeout, and returns its result.
 func (m *WarmRegistry) CallProxy(ctx context.Context, serverName, toolName string, arguments map[string]any, timeout time.Duration) (*mcp.CallToolResult, error) {
 	// 🛡️ ACTIVE-CALL TRACKING: PROXY-L2 — increment the counter on the server
 	// snapshot BEFORE acquiring the session, so the health monitor / EvictLRU

@@ -146,7 +146,7 @@ func (m *WarmRegistry) closeSubServerSnapshot(session *mcp.ClientSession, proces
 	}
 
 	if process != nil {
-		if err := killProcessGroup(process); err != nil {
+		if err := m.stopOwnChild(process); err != nil {
 			slog.Debug("lifecycle: kill process group failed during teardown", "error", err)
 		}
 	}

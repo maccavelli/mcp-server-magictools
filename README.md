@@ -201,3 +201,6 @@ CGO_ENABLED=0 go test ./...
 make lint
 make build-all
 ```
+
+The tests are safe beside a live magictools service; a built binary is not. See
+[Testing and process safety](docs/guides/testing-and-process-safety.md).

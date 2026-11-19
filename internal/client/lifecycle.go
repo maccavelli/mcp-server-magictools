@@ -49,6 +49,9 @@ func VerifyPipeIsolation(cmd *exec.Cmd, serverID string) error {
 	return nil
 }
 
+// The variables stamped on every sub-server (0010-MADR, D4). EnvManaged=EnvManagedValue is the sub-servers' own
+// signal that they run under the orchestrator (read by mcplib's IsOrchestratorOwned); it selects nothing for reaping.
+// EnvServerName names the server; ownership is EnvOwner (owner_stamp.go).
 const (
 	EnvManaged      = "MCP_ORCHESTRATOR_OWNED"
 	EnvManagedValue = "true"
@@ -238,7 +241,7 @@ func (m *WarmRegistry) performConnect(ctx context.Context, s *SubServer) error {
 	pendingMap := &sync.Map{}
 	session, filter, firewall, err := m.createSession(ctx, name, stdin, stdout, logFile, pendingMap)
 	if err != nil {
-		if killErr := killProcessGroup(cmd); killErr != nil {
+		if killErr := m.stopOwnChild(cmd); killErr != nil {
 			slog.Warn("lifecycle: cleanup kill failed after session error", "server", name, "error", killErr)
 		}
 		return err
@@ -549,8 +552,14 @@ func (m *WarmRegistry) spawnProcess(ctx context.Context, name, command string, a
 	setCloexec(realStdin)
 	setCloexec(realStdout)
 
+	// 🛡️ OWN-CHILD GATE (0010-MADR, D3): stopOwnChild signals this child only while its Wait has not returned.
+	exited := make(chan struct{})
+	m.childExits.Store(cmd, exited)
+
 	go func() {
 		err := cmd.Wait()
+		close(exited)
+		m.childExits.Delete(cmd)
 		// 🛡️ HARDEN-FD: Close the stderr log file to prevent FD leak across restarts
 		if stderrFile != nil {
 			if closeErr := stderrFile.Close(); closeErr != nil {
@@ -715,12 +724,9 @@ func (m *WarmRegistry) prepareProcessEnvironment(name string, env map[string]str
 		}
 	}
 
-	peerID := util.GenerateSessionID()
-	cmdEnv = append(cmdEnv,
-		fmt.Sprintf("MAGIC_TOOLS_PEER_ID=%s", peerID),
-		fmt.Sprintf("%s=%s", EnvManaged, EnvManagedValue),
-		fmt.Sprintf("%s=%s", EnvServerName, name),
-	)
+	// 🛡️ OWNER STAMP (0010-MADR, D4): drop every inherited orchestrator variable (this process may run under another
+	// orchestrator, a sub-server or a test), then stamp the sub-server flag, the name and this instance's owner.
+	cmdEnv = stampEnvironment(cmdEnv, m.ownerStamp(), name)
 
 	// GOMEMLIMIT: explicit config > hardcoded 1GB default.
 	// This is a soft GC cap — the Go runtime will aggressively sweep at this

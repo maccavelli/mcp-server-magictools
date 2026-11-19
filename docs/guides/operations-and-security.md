@@ -64,6 +64,26 @@ orchestrator process before opening the datastore. Do not copy live PID/lock
 state into another active environment, and do not launch ad hoc `serve`
 commands against a service-owned data path.
 
+Every sub-server carries an owner stamp, `MAGICTOOLS_OWNER`, that names the
+datastore directory and the orchestrator process that started it. At startup
+and on every health tick the orchestrator ends only sub-servers whose stamp
+names its own datastore and an owner that is no longer running, and its own
+detached processes. A helper one of its sub-servers detached on purpose (a
+build server, for example) is left alone while that sub-server is running, and
+ended once the sub-server has stopped. A sub-server whose parent process cannot
+be read counts as running, so its helpers are left alone. Two orchestrators on different
+datastores leave each other's sub-servers alone.
+Processes from a binary older than this stamp are never ended automatically.
+See [Testing and process safety](testing-and-process-safety.md) for the
+one-time check after upgrading.
+
+`serve` refuses to start, exiting with `process table: …`, when it cannot
+attach its process table. That happens when it cannot read its own process
+start time, cannot resolve the datastore directory, or runs as pid 1 (a
+container entrypoint). A service manager will restart it and it fails the same
+way, deliberately: without the table it can neither end its orphans nor keep
+one copy per sub-server. In a container, run it behind an init process.
+
 ## Backup and restore
 
 There is no MagicTools backup/export CLI. Use a cold filesystem backup:

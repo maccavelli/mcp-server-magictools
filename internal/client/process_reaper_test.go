@@ -45,17 +45,23 @@ func TestReportSubServerFailure(t *testing.T) {
 	m.reportSubServerFailure("test-server", 1)
 }
 
+// TestEnforceSingleInstanceSkipsSelf (0010, P5: over a fake process table). Before, it checked that this process's
+// pid, passed as an exclusion, was not in a local map the call never saw (a vacuous check) while the call scanned the
+// real machine. Now the table holds this process, an excluded pid and a real candidate, all stamped as this lineage's
+// stale children of the server "self": this process is never asked to be signalled (the fake fails the test if it
+// is), the exclusion is honoured, and the candidate is harvested, which shows the enforcement ran.
 func TestEnforceSingleInstanceSkipsSelf(t *testing.T) {
-	m := &WarmRegistry{Servers: make(map[string]*SubServer)}
-	myPid := os.Getpid()
-
-	toCheck := make(map[int]bool)
-	// We don't want to actually kill ourself, so we just check that excludePIDs works
-	m.enforceSingleInstance(context.Background(), "self", "bin", nil, myPid)
-
-	if toCheck[myPid] {
-		t.Error("expected self PID to be excluded from check")
-	}
+	self := SelfInfo{ProcInfo: ProcInfo{PID: 100, PPID: 99, Start: 1}}
+	m, fake, _ := newFakeProcessTableRegistry(t, self, func(mine Owner) []fakeProc {
+		gone := Owner{Lineage: mine.Lineage, PID: 9999, Start: 1}
+		return []fakeProc{
+			stamped(self.PID, self.PPID, gone, nameStamp("self")),
+			stamped(300, 1, gone, nameStamp("self")),
+			stamped(301, 1, gone, nameStamp("self")),
+		}
+	})
+	m.enforceSingleInstance(context.Background(), "self", "bin", nil, int(self.PID), 300)
+	wantSignalled(t, fake, 301)
 }
 
 // runWalk executes the walk under a watchdog so a regression that reintroduces
@@ -176,19 +182,28 @@ func TestParentWalkPerformsNoSyscalls(t *testing.T) {
 // TestPruneOrphansEnumeratesExactlyOnce is the cost guard. The old code
 // resolved a parent per step, which on Windows meant one full process-table
 // snapshot per step and never hit gopsutil's per-Process cache.
+//
+// Rewritten on the fake process table (0010, P4a step 4): the count is of
+// Snapshot calls on a table of ten thousand processes, and no real process is
+// enumerated or signalled.
 func TestPruneOrphansEnumeratesExactlyOnce(t *testing.T) {
-	calls := 0
-	prev := parentMap
-	parentMap = func() map[int32]int32 {
-		calls++
-		return map[int32]int32{}
+	self := SelfInfo{ProcInfo: ProcInfo{PID: 100, PPID: 99, Start: 1}}
+	procs := make([]fakeProc, 0, 10000)
+	for i := int32(0); i < 10000; i++ {
+		procs = append(procs, fakeProc{info: ProcInfo{PID: 1000 + i, PPID: 1, Start: uint64(i) + 5}, env: []string{"PATH=/bin"}})
 	}
-	t.Cleanup(func() { parentMap = prev })
-
+	fake := newFakeProcessTable(t, self, procs...)
 	m := &WarmRegistry{}
+	if err := m.AttachProcessTable(fake, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
 	m.PruneOrphans()
+	m.reapWG.Wait()
 
-	if calls != 1 {
+	if calls := fake.snapshotCount(); calls != 1 {
 		t.Fatalf("PruneOrphans enumerated the process table %d times, want exactly 1", calls)
+	}
+	if got := fake.signalLog(); len(got) != 0 {
+		t.Fatalf("unmarked processes were signalled: %v", got)
 	}
 }
