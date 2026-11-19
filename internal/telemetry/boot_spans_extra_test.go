@@ -24,8 +24,8 @@ func TestBootSpans(t *testing.T) {
 }
 
 func TestProxyRelayTracker(t *testing.T) {
-	rt := GlobalRelayTracker
-	rt.maxSize = 5 // force rotation
+	// Own tracker: the package-level GlobalRelayTracker keeps samples across rounds under -count=N.
+	rt := &ProxyRelayTracker{maxSize: 5} // force rotation
 
 	stats := rt.Stats()
 	if stats["count"] != 0 {
