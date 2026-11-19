@@ -14,7 +14,7 @@ import (
 )
 
 var (
-	// TelemetryPorts are the UDP ports used for dashboard telemetry (serve listens, dashboard connects).
+	// DefaultTelemetryPorts are the UDP ports used for dashboard telemetry (serve listens, dashboard connects).
 	DefaultTelemetryPorts = []int{49166, 49167, 49168, 49169, 49170}
 	// EmissionInterval controls how frequently the serve process pushes metrics to the dashboard.
 	EmissionInterval = 500 * time.Millisecond
@@ -37,6 +37,7 @@ type UDPServer struct {
 	clients    map[string]*udpClient
 	clientsMu  sync.RWMutex
 	cancelChan chan struct{}
+	stopOnce   sync.Once // makes Stop safe to call more than once, and from several goroutines
 
 	// Telemetry counters exposed for the Network Status dashboard tab
 	PacketsSent    atomic.Int64
@@ -106,15 +107,20 @@ func (s *UDPServer) Start(snapshotFunc func() map[string]any) {
 	go s.runSnapshotBroadcaster(snapshotFunc)
 }
 
-// Stop gracefully shuts down the UDP listener and broadcast loop.
+// Stop gracefully shuts down the UDP listener and broadcast loop. It is safe to call more than once and from several
+// goroutines: the shutdown runs once, and every call returns only after it has finished (sync.Once blocks a concurrent
+// caller until the first one is done). A service shutdown reaches Stop twice, from the graceful-shutdown path and from
+// the application's deferred Stop.
 func (s *UDPServer) Stop() {
 	if s == nil {
 		return
 	}
-	close(s.cancelChan)
-	if s.conn != nil {
-		closeConnOrWarn(s.conn)
-	}
+	s.stopOnce.Do(func() {
+		close(s.cancelChan)
+		if s.conn != nil {
+			closeConnOrWarn(s.conn)
+		}
+	})
 }
 
 // trimPayload reduces the snapshot size by removing low-priority keys in order.
