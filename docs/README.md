@@ -7,7 +7,7 @@ This tree holds three kinds of document:
 - guides you follow to do a thing.
 
 - **[architecture.md](architecture.md)** — how the pieces fit together, as they are now.
-- **guides/** — task-shaped walkthroughs for install, setup, clients, transports, configuration, the CLI, MCP tools, the dashboard, operations, and the repository audit.
+- **guides/** — task-shaped walkthroughs for install, setup, clients, transports, configuration, the CLI, MCP tools, the dashboard, operations, safe testing, and the repository audit.
 - **[decisions/](decisions/)** — numbered MADR/PLAN pairs.
 - **reports/** — what was observed, deciding nothing. None exists yet; the first report creates this directory.
 
@@ -30,9 +30,13 @@ This tree holds three kinds of document:
 | 0007 | MADR | [0007-MADR-install-the-fleet-agent-workspace.md](decisions/0007-MADR-install-the-fleet-agent-workspace.md) | accepted |
 | 0007 | PLAN | [0007-PLAN-install-the-fleet-agent-workspace.md](decisions/0007-PLAN-install-the-fleet-agent-workspace.md) | implemented |
 | 0008 | MADR | [0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md](decisions/0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md) | accepted |
-| 0008 | PLAN | [0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md](decisions/0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md) | in-progress |
+| 0008 | PLAN | [0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md](decisions/0008-PLAN-redesign-the-list-tools-middleware-under-the-complexity-limit.md) | implemented |
 | 0009 | MADR | [0009-MADR-stop-store-close-racing-background-writes.md](decisions/0009-MADR-stop-store-close-racing-background-writes.md) | accepted |
-| 0009 | PLAN | [0009-PLAN-stop-store-close-racing-background-writes.md](decisions/0009-PLAN-stop-store-close-racing-background-writes.md) | in-progress |
+| 0009 | PLAN | [0009-PLAN-stop-store-close-racing-background-writes.md](decisions/0009-PLAN-stop-store-close-racing-background-writes.md) | implemented |
+| 0010 | MADR | [0010-MADR-make-tests-unable-to-signal-real-processes.md](decisions/0010-MADR-make-tests-unable-to-signal-real-processes.md) | accepted |
+| 0010 | PLAN | [0010-PLAN-make-tests-unable-to-signal-real-processes.md](decisions/0010-PLAN-make-tests-unable-to-signal-real-processes.md) | in-progress |
+| 0011 | MADR | [0011-MADR-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md](decisions/0011-MADR-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md) | accepted |
+| 0011 | PLAN | [0011-PLAN-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md](decisions/0011-PLAN-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md) | implemented |
 
 ## I want to…
 
@@ -50,4 +54,5 @@ This tree holds three kinds of document:
 | understand or invoke MCP tools | [MCP tools and orchestration](guides/mcp-tools.md) |
 | inspect health, logs, or the dashboard | [Dashboard and observability](guides/dashboard-and-observability.md) |
 | back up data or review security boundaries | [Operations and security](guides/operations-and-security.md) |
+| run the tests without killing the live service's sub-servers | [Testing and process safety](guides/testing-and-process-safety.md) |
 | read the code-grounded repository audit | [Repository assessment](guides/repository-assessment.md) |
