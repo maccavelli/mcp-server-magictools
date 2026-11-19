@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 date: 2026-11-17
 associated-madr: "0006-MADR-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md"
 ---
@@ -361,6 +361,49 @@ before a push, not here.
 
 Status stays `in-progress`: the commit of the nine change files and of these records, and one CI run of the pushed
 commit, remain. Those are the criteria marked "not yet committed" and "waits for the commit and CI".
+
+### 2026-11-18, close-out: committed, pushed, CI green
+
+Added after the entry above; nothing above is rewritten. The status line moves from `in-progress` to `implemented`.
+
+- **Commits on `main`.** The records: `163472e` ("record 0006 re-verification on 1fe5ce7"). The change, the nine files
+  of the entry above and nothing else: `ec62c2d`. The pair sat on `5ac1030`, whose only difference from `1fe5ce7` is
+  the 0008 PLAN status line.
+- **The coordinator's gate**, on a scratch copy of the index at `5ac1030` plus the nine change files: `go build ./...`
+  exit 0; `go vet` of `internal/handler`, `internal/db` and `internal/util` exit 0; `make lint` with golangci-lint
+  v2.15.0 exit 0, "0 issues"; `go mod tidy -diff` exit 0. On the session machine the safe packages
+  (`./internal/handler/...`, `./internal/db/...`, `./cmd/...`) under `-race -count=3` through `run-heavy`: exit 0, no
+  data race. On the Linux machine the whole module under `-race -count=1` through `run-on-host --need linux --race`:
+  exit 0, 19 packages `ok`, after the read-only listing printed "no marked process and no magictools process on this
+  host" and pid 999999 was not alive.
+- **CI on `ec62c2d`**, run 44423979393, attempt 1: success. `Go (linux/amd64; build on tag)` 17 steps, `Go
+  (darwin/arm64)` 10 steps, `Go (windows/amd64)` 10 steps; the smoke job and the two publish jobs were skipped
+  (no tag). So every job built with the toolchain the `toolchain` line names (documented behaviour of `setup-go`; the
+  runs' own logs were not read for the version) and the lint step ran with v2.15.0 and passed.
+- **Correction, the coordinator's error.** The coordinator's brief for the finish said this change includes a CI floor
+  job. It does not and never did: the committed `ci.yml` differs from its parent by the one lint-pin line, and the
+  record's open question 1 (E3) is unchanged. By the owner's earlier ruling (label, relayed by the coordinator: "Only
+  for the two libraries (mcplib, mcp-buntdb)") a floor job is not added here. The entry of the same date above
+  already said no floor job was added; the brief was wrong, not the tree.
+- **Not changed, still open and not this record's:** `Makefile:71`'s install hint still says `@latest`;
+  `execute_pipeline.go:903-904` is the 0005 plan's (D7).
+
+**Completion criteria after the commit and CI** (the entry above lists the evidence for each earlier "met"):
+
+| Criterion | Evidence | State |
+| :--- | :--- | :--- |
+| Goal 1: `go 1.26.11`, `toolchain go1.27.4`; every current statement agrees | `ec62c2d`; the agreement check of the entry above on the same nine files | met |
+| Goal 2: `klauspost/compress` `v1.20.2`; `govulncheck ./...` exit 0 under both toolchains | `ec62c2d`; `govulncheck` rows of the entry above; the Linux whole-module runs | met |
+| Goal 3: no tag, release, install or restart | no tag; CI's smoke and publish jobs were skipped | met |
+| V1: baseline exit 3 under both toolchains | the entry above | met |
+| V2: agreement exit 0 on the tree, exit 1 on three planted copies | the entry above (and two more plants) | met |
+| V3: `govulncheck`, build, vet, tests at both toolchains, cross-builds, `gofmt`, `markdownlint` | the entry above; the coordinator's gate; CI's three platform jobs | met |
+| MADR Confirmation: after, agreement, lint (no type-check error under both toolchains; findings decided by the owner) | the entry above; `make lint` v2.15.0 "0 issues"; F1 fixed, F2 removed by record 0008 | met |
+| Sequencing (D6): the redesign landed before this change was pushed | `1fe5ce7` precedes `ec62c2d` | met |
+| Committed, and CI's run observed (jobs build; lint step with v2.15.0 green) | `ec62c2d`, run 44423979393, success | met |
+| A floor job in CI | not part of this change (MADR open question 1; the owner's ruling above) | not in scope, not required |
+
+Every criterion is met; the plan is `implemented`. The MADR stays `accepted`, as the closed 0008 and 0009 MADRs do.
 
 ## Deviations
 
