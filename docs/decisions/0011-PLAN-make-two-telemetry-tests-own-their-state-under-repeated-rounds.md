@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 date: 2026-11-19
 associated-madr: "0011-MADR-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md"
 ---
@@ -125,3 +125,25 @@ gofmt clean on the two files; `go vet ./internal/telemetry/` exit 0; compile-onl
 ### Deviations
 
 None.
+
+### 2026-11-19, close-out (added; no earlier line rewritten, apart from the status line)
+
+Phase 4 above and the second completion criterion say "pending"; they are superseded by this entry.
+
+* The first gate run by the coordinator reported the record check exit 1: the three links to the then-uncommitted 0010 PLAN were broken in the
+  committed state. They were changed to plain code text with a "not yet committed" note before the commit, as it happened.
+* Commits on `main`: the records `82769dd`, the two test files `472c38b`.
+* Coordinator gate, on a copy of the index plus the two test files (record 0010's uncommitted files not in the copy): `go build ./...` exit 0;
+  `go vet ./internal/telemetry/` exit 0; `make lint` with golangci-lint v2.15.0 exit 0 ("0 issues"); gofmt clean; `check_records.py --check-all` exit 0 on a
+  fresh copy of the index after the link fix.
+* On the Linux machine through `run-on-host --need linux --race`, after the read-only listing printed "no marked process and no magictools process
+  on this host" and pid 999999 was not alive: `go test -race -count=3 -shuffle=on -v ./internal/telemetry/` exit 0, shuffle seed
+  `1795117978750856749`; then `go test -race -count=3 -timeout 40m ./...` on the whole committed module exit 0, every package ok, no data race. That
+  last command is the one that failed before this record.
+* CI on `472c38b`, run 44603457405, attempt 1, success: `Go (linux/amd64; build on tag)` 17 steps, `Go (darwin/arm64)` 10 steps,
+  `Go (windows/amd64)` 10 steps; the smoke and two publish jobs skipped (no tag). The two tests therefore also pass on the hosted macOS and Windows
+  runners, one round each, which the MADR's Not verified list had left open for those two systems at `-count=1`.
+* Completion criteria: (1) met, Linux runs and plants as recorded above; (2) met, gates passed and the records and test files are committed;
+  (3) met as a command: `go test -race -count=3 ./...` exits 0 on the committed module holding these tests. Record 0010's own phase P9 run on its
+  own tree remains that record's step and is not claimed here.
+* Not done: `-count=3` on macOS and Windows (CI runs one round there); order independence beyond the orders run.
