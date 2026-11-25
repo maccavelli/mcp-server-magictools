@@ -59,36 +59,6 @@ func TestSystemdUnitTemplateHardening(t *testing.T) {
 	}
 }
 
-// A3: the launchd plist ExitTimeOut must exceed the app's 30s shutdown deadline
-// so launchd does not SIGKILL mid-drain.
-func TestLaunchdPlistTemplateHardening(t *testing.T) {
-	out := renderServiceTemplate(t, launchdPlistTemplate, map[string]string{
-		"BinPath":     "/Users/u/.local/bin/mcp-server-magictools",
-		"BindAddr":    "localhost:48080",
-		"EnvPath":     "/opt/homebrew/bin:/usr/local/bin",
-		"LogDir":      "/Users/u/Library/Caches/mcp-server-magictools",
-		"RecallURL":   "",
-		"SocraticURL": "",
-	})
-	if !strings.Contains(out, "<key>ExitTimeOut</key>") {
-		t.Fatalf("plist missing ExitTimeOut key:\n%s", out)
-	}
-	// The ExitTimeOut value must be >= 35 (and strictly > 30).
-	if strings.Contains(out, "<key>ExitTimeOut</key>\n    <integer>20</integer>") {
-		t.Error("plist still uses the old ExitTimeOut=20 (would SIGKILL mid-drain)")
-	}
-	for _, want := range []string{
-		"<integer>35</integer>",
-		"<key>RunAtLoad</key>",
-		"<key>KeepAlive</key>",
-		"<string>serve</string>",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("plist missing %q\nrendered:\n%s", want, out)
-		}
-	}
-}
-
 // A1/A2: SIGHUP is classified as a reload signal (Unix), SIGINT/SIGTERM are not.
 func TestReloadSignalClassification(t *testing.T) {
 	if isReloadSignal(syscall.SIGINT) {
@@ -111,12 +81,22 @@ func TestReloadSignalClassification(t *testing.T) {
 	}
 }
 
+type fakeIdentityReader struct{}
+
+func (fakeIdentityReader) Self() (processIdentity, error) {
+	return processIdentity{PID: os.Getpid(), Start: 12345, Executable: "/fake/service"}, nil
+}
+func (fakeIdentityReader) Verify(id processIdentity) (bool, error) { return id.Start == 12345, nil }
+
 // A8: the state file must be written 0600 and round-trip cleanly.
 func TestWriteServiceStateModeAndRoundTrip(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv(config.EnvConfigDir, tmp)
 
 	app := &OrchestratorApp{}
+	oldIdentity := serviceIdentity
+	serviceIdentity = fakeIdentityReader{}
+	t.Cleanup(func() { serviceIdentity = oldIdentity })
 	app.writeServiceState("localhost:54321")
 
 	statePath := filepath.Join(tmp, "service.state")
@@ -158,7 +138,7 @@ func TestIsProcessAlive(t *testing.T) {
 	}
 }
 
-// resolveLaunchdTarget falls back to the current user and honours SUDO_UID.
+// resolveLaunchdTarget uses the current user and refuses a mismatched SUDO_UID.
 func TestResolveLaunchdTarget(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("uid semantics differ on Windows")
@@ -168,13 +148,21 @@ func TestResolveLaunchdTarget(t *testing.T) {
 	// Fallback path: no SUDO_* set → current user.
 	t.Setenv("SUDO_UID", "")
 	t.Setenv("SUDO_USER", "")
-	if _, uid, _, err := resolveLaunchdTarget(); err != nil || uid != wantUID {
+	if _, uid, err := resolveLaunchdTarget(); err != nil || uid != wantUID {
 		t.Errorf("fallback: got uid=%q err=%v, want uid=%q", uid, err, wantUID)
 	}
 
-	// SUDO path: SUDO_UID set to our own uid → resolves via LookupId.
+	// Same-uid sudo is the current user, not a mixed target.
 	t.Setenv("SUDO_UID", wantUID)
-	if _, uid, _, err := resolveLaunchdTarget(); err != nil || uid != wantUID {
+	if _, uid, err := resolveLaunchdTarget(); err != nil || uid != wantUID {
 		t.Errorf("sudo: got uid=%q err=%v, want uid=%q", uid, err, wantUID)
+	}
+
+	// A different SUDO_UID is refused before any home or domain is used.
+	if wantUID != "1" {
+		t.Setenv("SUDO_UID", "1")
+		if _, _, err := resolveLaunchdTarget(); err == nil {
+			t.Fatal("accepted mismatched sudo target")
+		}
 	}
 }

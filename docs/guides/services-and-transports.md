@@ -48,9 +48,26 @@ mcp-server-magictools service reinstall
 mcp-server-magictools service uninstall
 ```
 
-Use `service status --json` for automation. `service doctor` reports diagnostic
-issues but currently does not return a failing exit status solely because it
-found them.
+Use `service status --json` for automation. Status verifies the recorded process
+start token and executable rather than treating any live PID as the service.
+The JSON object keeps `status`, `ready`, `pid`, `addr`, `started`, `version`,
+`binary`, and `identity_error`, and adds `registration`, `enabled`,
+`manager_process`, `readiness`, and `stale`. `enabled` and `manager_process`
+stay `unknown` unless a manager probe filled them. `service doctor` returns a
+nonzero status when it finds actionable issues.
+
+On macOS the generated LaunchAgent uses unconditional `KeepAlive`, `RunAtLoad`,
+a five-second throttle, `ProcessType=Standard`, and a 35-second exit timeout.
+`service stop` disables and boots out the job but leaves its plist installed, so
+the stop persists across logins. `service start` enables it again and waits for
+identity-verified `/health` readiness; degraded HTTP 200 counts as ready.
+`service restart` boots out and starts the job without leaving it disabled.
+Run these commands in the owning user's GUI session. A mismatched `SUDO_UID`
+is refused before any definition is written or any launchd domain is changed.
+Both launchd output streams use
+`~/Library/Caches/mcp-server-magictools/magictools_debug.log`. The application
+truncates that log when it exceeds 50 MiB on open; it does not rotate a
+continuously growing file while the process remains running.
 
 ## Listener layout
 

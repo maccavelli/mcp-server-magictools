@@ -35,18 +35,9 @@ func bufferFromPool(pool *sync.Pool) *bytes.Buffer {
 	return buf
 }
 
-func execOrWarn(name string, args ...string) {
-	if _, err := timedExec(name, args...); err != nil {
-		slog.Warn("cmd: exec failed", "cmd", name, "args", args, "error", err)
-	}
-}
-
-func signalOrWarn(p *os.Process, sig os.Signal) {
-	if p == nil {
-		return
-	}
-	if err := p.Signal(sig); err != nil {
-		slog.Warn("cmd: signal failed", "signal", sig, "error", err)
+func execSystemdOrWarn(args ...string) {
+	if _, err := timedExec("systemctl", args...); err != nil {
+		slog.Warn("cmd: exec failed", "cmd", "systemctl", "args", args, "error", err)
 	}
 }
 

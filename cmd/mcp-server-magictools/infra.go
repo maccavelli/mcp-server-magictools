@@ -33,7 +33,7 @@ func watchdog(ctx context.Context, cancel context.CancelFunc) {
 // watchBinary monitors the executable for changes and triggers graceful shutdown.
 // Disabled in service mode where systemd/launchd manages restarts natively.
 func watchBinary(ctx context.Context, cancel context.CancelFunc) {
-	if os.Getenv("MCP_SERVICE_MODE") == "true" {
+	if os.Getenv("MCP_SERVICE_MODE") == serviceModeTrue {
 		slog.Info("watchBinary: disabled in service mode (systemd/launchd manages restarts)")
 		return
 	}

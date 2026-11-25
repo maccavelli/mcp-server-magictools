@@ -85,6 +85,21 @@ one package or all of them. By the guard's showing:
 
 CI is not affected: the hosted runners have no live service.
 
+## Isolated launchd verification
+
+Launchd lifecycle probes and their helper processes belong in a scratch clone,
+not the primary checkout. Use a random `local.magictools.test.*` label, a
+temporary HOME and plist, dynamic loopback listeners, and cleanup that names
+only that exact label. The helper must not open MagicTools' database or import
+the orchestrator startup path. Never use the production LaunchAgent label in a
+test harness. An environment skip is unfinished proof, not a passing behavioral
+test. Record macOS version, exit codes, and cleanup results with the run.
+
+The accepted launchd lifecycle plan uses the same rule for clean exit, nonzero
+exit, crash supervision, disable/start/restart, timeout, and update recovery.
+Native full-suite and race runs still use the fleet queue and scratch-tree
+workflow described above.
+
 ## The guard
 
 `internal/testsafety` parses the module's Go source and imports nothing from the module, so running it cannot start a

@@ -59,8 +59,11 @@ var defaultAllowlist = slices.Concat(
 		u(primCmdTaskkill, 1)),
 	group("internal/proctable/table_test.go", siteOwnChild, "ends the test's own helper child through its handle",
 		u(primKill, 1)),
+	// S7's killStaleProcess was deleted (0010, the owner's ruling of 2026-11-19): its os.FindProcess went with it.
 	group("internal/proctable/table_test.go", siteOwnChild, "re-runs the test binary itself (os.Args[0]) as the test's own helper child",
 		u(primTestExecNonLiteral, 1)),
+	group("internal/serviceidentity/identity.go", "S1", "read-only start-token and executable identity; no signaling or enumeration",
+		u(primGopsutilNewProc, 2)),
 
 	// S2: the single-instance enforcer. Its platform files (reaper_harvest_unix.go, reaper_harvest_windows.go) were
 	// deleted in P4a step 4; it signals through the process table above.
@@ -84,11 +87,8 @@ var defaultAllowlist = slices.Concat(
 
 	// S6 to S8: service control, reached by no test.
 	group("cmd/mcp-server-magictools/service.go", "S6", "service control by the platform manager",
-		u(primCmdSystemctl, 12), u(primCmdLaunchctl, 13), u(primCmdKill, 1)),
-	// S7's killStaleProcess was deleted (0010, the owner's ruling of 2026-11-19): its os.FindProcess went with it.
-	group("cmd/mcp-server-magictools/service.go", "S7", "wait for, and stop, the recorded service pid", u(primFindProcess, 1)),
+		u(primCmdSystemctl, 11)),
 	group("cmd/mcp-server-magictools/service_refresh.go", "S6", "daemon-reload", u(primCmdSystemctl, 1)),
-	group("cmd/mcp-server-magictools/io_helpers.go", "S7", "signalOrWarn", u(primSignal, 1)),
-	group("cmd/mcp-server-magictools/update_service.go", "S8", "the updater's service stop and start",
-		u(primCmdSystemctl, 1), u(primCmdLaunchctl, 1)),
+	group("cmd/mcp-server-magictools/io_helpers.go", "S6", "bounded systemd daemon reload and disable",
+		u(primCmdSystemctl, 2)),
 )

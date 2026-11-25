@@ -2,17 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
-	"github.com/maccavelli/mcplib/selfupdate"
+	"github.com/maccavelli/go-selfupdate-lib/selfupdate"
 
 	"github.com/maccavelli/mcp-server-magictools/internal/config"
 )
@@ -39,6 +37,7 @@ const (
 // restarts a service it does not own.
 type updateLifecycle struct {
 	target string
+	job    selfupdate.Lifecycle
 
 	// Seams. Production leaves them nil and the platform implementations run.
 	installedFn func(ctx context.Context, target string) (bool, error)
@@ -62,8 +61,6 @@ func (l *updateLifecycle) Installed(ctx context.Context, _ string) (bool, error)
 	}
 	return serviceDefinitionTargets(l.target)
 }
-
-// Running reports whether the recorded service process is alive.
 func (l *updateLifecycle) Running(ctx context.Context, _ string) (bool, error) {
 	if err := ctx.Err(); err != nil {
 		return false, err
@@ -71,7 +68,11 @@ func (l *updateLifecycle) Running(ctx context.Context, _ string) (bool, error) {
 	if l.runningFn != nil {
 		return l.runningFn(ctx)
 	}
-	return serviceProcessAlive()
+	life, err := l.serviceJob()
+	if err != nil {
+		return false, err
+	}
+	return life.Running(ctx, cmdName)
 }
 
 // Stop halts the managed service.
@@ -82,7 +83,11 @@ func (l *updateLifecycle) Stop(ctx context.Context, _ string) error {
 	if l.stopFn != nil {
 		return l.stopFn(ctx)
 	}
-	return serviceControl(ctx, serviceActionStop)
+	life, err := l.serviceJob()
+	if err != nil {
+		return err
+	}
+	return life.Stop(ctx, cmdName)
 }
 
 // Start launches the managed service.
@@ -93,7 +98,11 @@ func (l *updateLifecycle) Start(ctx context.Context, _ string) error {
 	if l.startFn != nil {
 		return l.startFn(ctx)
 	}
-	return serviceControl(ctx, serviceActionStart)
+	life, err := l.serviceJob()
+	if err != nil {
+		return err
+	}
+	return life.Start(ctx, cmdName)
 }
 
 // WaitHealthy polls the recorded service PID until it is alive, the deadline
@@ -104,61 +113,33 @@ func (l *updateLifecycle) WaitHealthy(ctx context.Context, product string) error
 	if timeout <= 0 {
 		timeout = healthTimeout
 	}
-	poll := l.Poll
-	if poll <= 0 {
-		poll = healthPoll
-	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	ticker := time.NewTicker(poll)
-	defer ticker.Stop()
-
-	var lastErr error
-	for {
-		alive, err := l.Running(ctx, product)
-		switch {
-		case err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled):
-			lastErr = err
-		case alive:
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			if lastErr != nil {
-				return fmt.Errorf("%s did not become healthy within %s: %w", product, timeout, lastErr)
-			}
-			return fmt.Errorf("%s did not become healthy within %s", product, timeout)
-		case <-ticker.C:
-		}
+	if l.runningFn != nil {
+		return waitServiceHealth(ctx, product, func(ctx context.Context, _ string) (bool, error) { return l.runningFn(ctx) }, timeout, l.Poll)
 	}
+	life, err := l.serviceJob()
+	if err != nil {
+		return err
+	}
+	return life.WaitHealthy(ctx, product)
+}
+
+func (l *updateLifecycle) serviceJob() (selfupdate.Lifecycle, error) {
+	if l.job != nil {
+		return l.job, nil
+	}
+	job, err := newUpdateServiceJob(l.target)
+	if err != nil {
+		return nil, err
+	}
+	l.job = job
+	return job, nil
 }
 
 // serviceStatePath is where the running service records its PID and binary.
 func serviceStatePath() string {
 	return filepath.Join(config.DefaultConfigDir(), "service.state")
-}
-
-// readServiceState returns the recorded state, or false when there is none.
-func readServiceState() (cliServiceState, bool) {
-	data, err := os.ReadFile(serviceStatePath()) // #nosec G304 — fixed config path
-	if err != nil {
-		return cliServiceState{}, false
-	}
-	var st cliServiceState
-	if json.Unmarshal(data, &st) != nil {
-		return cliServiceState{}, false
-	}
-	return st, true
-}
-
-// serviceProcessAlive reports whether the recorded service PID is alive.
-func serviceProcessAlive() (bool, error) {
-	st, ok := readServiceState()
-	if !ok || st.PID == 0 {
-		return false, nil
-	}
-	return isProcessAlive(st.PID), nil
 }
 
 // serviceDefinitionTargets reports whether an OS service definition exists and
@@ -169,7 +150,10 @@ func serviceDefinitionTargets(target string) (bool, error) {
 	if !ok {
 		return false, nil
 	}
-	data, err := os.ReadFile(path) // #nosec G304 — fixed per-platform definition path
+	if filepath.Ext(path) == ".plist" {
+		return launchdDefinitionTargets(path, target)
+	}
+	data, err := os.ReadFile(path) // #nosec G304 -- fixed per-platform service definition path
 	if err != nil {
 		if os.IsNotExist(err) {
 			return false, nil
@@ -177,50 +161,65 @@ func serviceDefinitionTargets(target string) (bool, error) {
 		return false, err
 	}
 	resolved, err := filepath.EvalSymlinks(target)
-	if err != nil {
-		resolved = target
+	if err == nil {
+		target = resolved
 	}
-	body := string(data)
-	return strings.Contains(body, target) || strings.Contains(body, resolved), nil
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "ExecStart=") {
+			continue
+		}
+		fields := strings.Fields(strings.TrimPrefix(line, "ExecStart="))
+		if len(fields) == 0 {
+			continue
+		}
+		candidate, err := filepath.EvalSymlinks(fields[0])
+		if err == nil {
+			fields[0] = candidate
+		}
+		return fields[0] == target, nil
+	}
+	return false, nil
 }
 
-// serviceControl runs the platform service manager for stop/start.
-func serviceControl(ctx context.Context, action string) error {
-	switch runtime.GOOS {
-	case goOSLinux:
-		return runServiceTool(ctx, "systemctl", systemctlUserFlag, action, cmdName+".service")
-	case goOSDarwin:
-		path, ok := serviceDefinitionPath()
-		if !ok {
-			return fmt.Errorf("no launchd definition for %s", cmdName)
-		}
-		verb := "bootstrap"
-		if action == serviceActionStop {
-			verb = "bootout"
-		}
-		return runServiceTool(ctx, "launchctl", verb, launchdGUITarget(), path)
-	case goOSWindows:
-		if action == serviceActionStop {
-			return stopWindowsService()
-		}
-		return startWindowsService()
-	default:
-		return fmt.Errorf("service control is not supported on %s", runtime.GOOS)
+func launchdDefinitionProgram(path string) (string, error) {
+	data, err := os.ReadFile(path) // #nosec G304 -- resolved LaunchAgent definition path
+	if err != nil {
+		return "", err
 	}
+	var p plistXML
+	if err := xml.Unmarshal(data, &p); err != nil {
+		return "", fmt.Errorf("parse launchd definition: %w", err)
+	}
+	values := map[string]plistXMLValue{}
+	for i, key := range p.Dict.Keys {
+		if i < len(p.Dict.Values) {
+			values[key] = plistXMLValue{Text: strings.TrimSpace(p.Dict.Values[i].Text), Items: p.Dict.Values[i].Items}
+		}
+	}
+	program := values["Program"].Text
+	if program == "" && len(values["ProgramArguments"].Items) > 0 {
+		program = values["ProgramArguments"].Items[0]
+	}
+	if program == "" {
+		return "", errors.New("launchd definition has no program")
+	}
+	if resolved, err := filepath.EvalSymlinks(program); err == nil {
+		program = resolved
+	}
+	return program, nil
 }
 
-// runServiceTool runs a service-manager command under the caller's context so
-// an interrupted update stops waiting on it.
-func runServiceTool(ctx context.Context, name string, args ...string) error {
-	// #nosec G204 — name and args are constants plus a fixed definition path.
-	cmd := exec.CommandContext(ctx, name, args...)
-	out, err := cmd.CombinedOutput()
+func launchdDefinitionTargets(path, target string) (bool, error) {
+	program, err := launchdDefinitionProgram(path)
 	if err != nil {
-		detail := strings.TrimSpace(string(out))
-		if detail != "" {
-			return fmt.Errorf("%s %s: %w (%s)", name, strings.Join(args, " "), err, detail)
+		if os.IsNotExist(err) {
+			return false, nil
 		}
-		return fmt.Errorf("%s %s: %w", name, strings.Join(args, " "), err)
+		return false, err
 	}
-	return nil
+	if resolved, err := filepath.EvalSymlinks(target); err == nil {
+		target = resolved
+	}
+	return program == target, nil
 }

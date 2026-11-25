@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -30,6 +31,7 @@ type cliServiceState struct {
 	Started       string `json:"started"`
 	ConfigVersion string `json:"config_version"`
 	BinaryPath    string `json:"binary_path"`
+	StartToken    uint64 `json:"start_token"`
 }
 
 var forceServiceInstall bool
@@ -151,14 +153,10 @@ func runServiceInstall(cmd *cobra.Command, args []string) error {
 		healthy := false
 		for range 20 { // 10 seconds
 			time.Sleep(500 * time.Millisecond)
-			statePath := filepath.Join(config.DefaultConfigDir(), "service.state")
-			if data, err := readConfigFile(statePath); err == nil {
-				var state cliServiceState
-				if json.Unmarshal(data, &state) == nil && isProcessAlive(state.PID) {
-					fmt.Printf("  ✓ Service is healthy (PID: %d, Addr: %s)\n", state.PID, state.Addr)
-					healthy = true
-					break
-				}
+			if state, err := readExpectedServiceState(processIdentity{}); err == nil {
+				fmt.Printf("  ✓ Service is healthy (PID: %d, Addr: %s)\n", state.PID, state.Addr)
+				healthy = true
+				break
 			}
 		}
 		if !healthy {
@@ -231,55 +229,29 @@ var serviceStatusCmd = &cobra.Command{
 
 // TEL-4: Machine-readable JSON status output
 func runServiceStatus(cmd *cobra.Command, args []string) error {
-	statePath := filepath.Join(config.DefaultConfigDir(), "service.state")
-	data, err := readConfigFile(statePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if jsonStatusOutput {
-				fmt.Println(`{"status":"stopped","reason":"no state file"}`)
-			} else {
-				fmt.Println("✗ Service is not running (no state file)")
-			}
-			return nil
-		}
-		return fmt.Errorf("failed to read state file: %w", err)
-	}
-
-	var state cliServiceState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("failed to parse state file: %w", err)
-	}
-
-	alive := isProcessAlive(state.PID)
-
+	state, readErr := readExpectedServiceState(processIdentity{})
+	registered, regErr := definitionRegistered()
+	alive := readErr == nil
 	if jsonStatusOutput {
-		status := "stopped"
-		if alive {
-			status = "running"
-		}
-		fmt.Println(string(marshalIndentOrEmpty(map[string]any{
-			"status":  status,
-			"pid":     state.PID,
-			"addr":    state.Addr,
-			"started": state.Started,
-			"version": state.ConfigVersion,
-			"binary":  state.BinaryPath,
-		})))
-		return nil
+		fmt.Println(string(marshalIndentOrEmpty(buildServiceStatus(state, readErr, registered))))
+		return regErr
 	}
-
 	if alive {
-		fmt.Printf("✓ Service is running\n")
+		fmt.Println("✓ Service process identity is valid")
 	} else {
-		fmt.Printf("✗ Service is NOT running (stale state file)\n")
+		fmt.Printf("✗ Service is not verified: %v\n", readErr)
 	}
-	fmt.Printf("  PID:     %d\n", state.PID)
-	fmt.Printf("  Addr:    %s\n", state.Addr)
-	fmt.Printf("  Started: %s\n", state.Started)
-	fmt.Printf("  Version: %s\n", state.ConfigVersion)
-	fmt.Printf("  Binary:  %s\n", state.BinaryPath)
+	fmt.Printf("  PID:     %d\n  Addr:    %s\n  Started: %s\n  Version: %s\n  Binary:  %s\n",
+		state.PID, state.Addr, state.Started, state.ConfigVersion, state.BinaryPath)
+	fmt.Printf("  Registered: %t\n", registered)
+	return regErr
+}
 
-	return nil
+func errorString(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 // -------------------------------------------------------------------------
@@ -385,15 +357,15 @@ func installSystemd(binPath string) error {
 	if out, err := timedExec("systemctl", systemctlUserFlag, "enable", "mcp-server-magictools.service"); err != nil {
 		// HARD-3: Rollback on partial failure
 		removeFileOrWarn(unitPath)
-		execOrWarn("systemctl", systemctlUserFlag, "daemon-reload")
+		execSystemdOrWarn("systemctl", systemctlUserFlag, "daemon-reload")
 		return fmt.Errorf("systemctl enable failed (rolled back): %s: %w", string(out), err)
 	}
 
 	if out, err := timedExec("systemctl", systemctlUserFlag, "start", "mcp-server-magictools.service"); err != nil {
 		// HARD-3: Rollback on partial failure — disable + remove
-		execOrWarn("systemctl", systemctlUserFlag, "disable", "mcp-server-magictools.service")
+		execSystemdOrWarn("systemctl", systemctlUserFlag, "disable", "mcp-server-magictools.service")
 		removeFileOrWarn(unitPath)
-		execOrWarn("systemctl", systemctlUserFlag, "daemon-reload")
+		execSystemdOrWarn("systemctl", systemctlUserFlag, "daemon-reload")
 		return fmt.Errorf("systemctl start failed (rolled back): %s: %w", string(out), err)
 	}
 
@@ -411,33 +383,20 @@ func uninstallSystemd() error {
 
 	unitPath := filepath.Join(home, ".config", "systemd", "user", "mcp-server-magictools.service")
 
-	// HARD-23: Read PID before stopping so we can wait for actual exit
-	var stalePID int
-	statePath := filepath.Join(config.DefaultConfigDir(), "service.state")
-	if data, err := readConfigFile(statePath); err == nil {
-		var state cliServiceState
-		if json.Unmarshal(data, &state) == nil {
-			stalePID = state.PID
-		}
+	ctx, cancel := serviceActionContext(context.Background())
+	defer cancel()
+	if err := runSharedServiceAction(ctx, serviceActionStop); err != nil {
+		return err
 	}
-
-	// Stop and disable (ignore errors if not running)
-	cmds := [][]string{
-		{"systemctl", systemctlUserFlag, "stop", "mcp-server-magictools.service"},
-		{"systemctl", systemctlUserFlag, "disable", "mcp-server-magictools.service"},
+	if _, err := timedExec("systemctl", systemctlUserFlag, "disable", "mcp-server-magictools.service"); err != nil {
+		return err
 	}
-	for _, c := range cmds {
-		execOrWarn(c[0], c[1:]...)
-	}
-
-	// HARD-23: Wait for process to actually exit before cleanup
-	waitForProcessExit(stalePID, 20*time.Second)
 
 	if err := os.Remove(unitPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove unit file: %w", err)
 	}
 
-	execOrWarn("systemctl", systemctlUserFlag, "daemon-reload")
+	execSystemdOrWarn("systemctl", systemctlUserFlag, "daemon-reload")
 
 	cleanupServiceArtifacts()
 
@@ -449,93 +408,37 @@ func uninstallSystemd() error {
 // macOS: LaunchAgent plist
 // -------------------------------------------------------------------------
 
-const launchdPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.magictools.mcp-server-magictools</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>{{.BinPath}}</string>
-        <string>serve</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>PATH</key>
-        <string>{{.EnvPath}}</string>
-        <key>MCP_SERVICE_MODE</key>
-        <string>true</string>
-        <key>MCP_ENDPOINT_IDE_PORT</key>
-        <string>{{.BindAddr}}</string>
-        {{if .RecallURL}}<key>MCP_REC_URL</key>
-        <string>{{.RecallURL}}</string>{{end}}
-        {{if .SocraticURL}}<key>MCP_SOC_URL</key>
-        <string>{{.SocraticURL}}</string>{{end}}
-    </dict>
-    <key>LimitLoadToSessionType</key>
-    <array>
-        <string>Aqua</string>
-        <string>Background</string>
-        <string>StandardIO</string>
-    </array>
-    <key>WorkingDirectory</key>
-    <string>{{.LogDir}}</string>
-    <key>ProcessType</key>
-    <string>Background</string>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <dict>
-        <key>SuccessfulExit</key>
-        <false/>
-        <key>Crashed</key>
-        <true/>
-    </dict>
-    <key>ThrottleInterval</key>
-    <integer>5</integer>
-    <!-- A3: ExitTimeOut must exceed the app's 30s shutdown deadline so launchd
-         does not SIGKILL the process mid-drain. -->
-    <key>ExitTimeOut</key>
-    <integer>35</integer>
-    <key>StandardOutPath</key>
-    <string>{{.LogDir}}/magictools_service.log</string>
-    <key>StandardErrorPath</key>
-    <string>{{.LogDir}}/magictools_service.log</string>
-</dict>
-</plist>
-`
+func launchdPlistPath() (string, error) {
+	home, _, err := resolveLaunchdTargetFn()
+	if err != nil {
+		return "", err
+	}
+	return home + "/Library/LaunchAgents/" + productionServiceLabel + ".plist", nil
+}
 
-// resolveLaunchdTarget resolves target home directory, user ID and username
-// for LaunchAgent installation, supporting sudo environment resolution.
-func resolveLaunchdTarget() (string, string, string, error) {
-	uidStr := os.Getenv("SUDO_UID")
-	username := os.Getenv("SUDO_USER")
+// resolveLaunchdTargetFn is the launchd home/uid seam. Tests point it at a
+// scratch home so install and uninstall never touch the operator plist.
+var resolveLaunchdTargetFn = resolveLaunchdTarget
 
-	if uidStr != "" {
-		u, err := user.LookupId(uidStr)
-		if err == nil {
-			return u.HomeDir, u.Uid, u.Username, nil
-		}
-		if username != "" {
-			u, err = user.Lookup(username)
-			if err == nil {
-				return u.HomeDir, u.Uid, u.Username, nil
-			}
-		}
+// resolveLaunchdTarget resolves the current user's LaunchAgent home and uid.
+// A mismatched SUDO_UID is refused before any path is used: sudo must not
+// mix the invoking process with another user's launchd domain.
+func resolveLaunchdTarget() (string, string, error) {
+	if sudo := os.Getenv("SUDO_UID"); sudo != "" && sudo != strconv.Itoa(os.Getuid()) {
+		return "", "", fmt.Errorf("refusing mismatched sudo launchd target uid %s while running as uid %d: run service commands as the logged-in user in a GUI session", sudo, os.Getuid())
 	}
 
 	currentUser, err := user.Current()
 	if err != nil {
 		home, homeErr := os.UserHomeDir()
 		if homeErr != nil {
-			return "", "", "", fmt.Errorf("failed to resolve user home: %w (current error: %w)", homeErr, err)
+			return "", "", fmt.Errorf("failed to resolve user home: %w (current error: %w)", homeErr, err)
 		}
 		// BUG-8: Return error instead of guessing UID 501/staff
-		return "", "", "", fmt.Errorf("failed to resolve current user: %w (home resolved to: %s)", err, home)
+		return "", "", fmt.Errorf("failed to resolve current user: %w (home resolved to: %s)", err, home)
 	}
 
-	return currentUser.HomeDir, currentUser.Uid, currentUser.Username, nil
+	return currentUser.HomeDir, currentUser.Uid, nil
 }
 
 // buildLaunchdPath builds a robust PATH including standard macOS and Homebrew locations.
@@ -594,7 +497,15 @@ func timedExec(name string, args ...string) ([]byte, error) {
 }
 
 func installLaunchd(binPath string) error {
-	home, uidStr, username, err := resolveLaunchdTarget()
+	ctx, cancel := serviceActionContext(context.Background())
+	defer cancel()
+	return withServiceLock(ctx, productionServiceLabel, func(context.Context) error {
+		return installLaunchdLocked(binPath)
+	})
+}
+
+func installLaunchdLocked(binPath string) error {
+	home, uidStr, err := resolveLaunchdTargetFn()
 	if err != nil {
 		return err
 	}
@@ -611,17 +522,12 @@ func installLaunchd(binPath string) error {
 		chownForUser(agentDir, uidStr)
 	}
 
-	plistPath := filepath.Join(agentDir, "com.magictools.mcp-server-magictools.plist")
+	plistPath := filepath.Join(agentDir, productionServiceLabel+".plist")
 
 	// BUG-5/HARD-2: Allow --force to overwrite existing service files for upgrades
 	if _, err := os.Stat(plistPath); err == nil && !forceServiceInstall {
 		fmt.Printf("Service file already exists at %s.\nUse --force to overwrite for upgrades.\n", plistPath)
 		return nil
-	}
-
-	tmpl, err := template.New("launchd").Parse(launchdPlistTemplate)
-	if err != nil {
-		return fmt.Errorf("failed to parse template: %w", err)
 	}
 
 	// CRITICAL: Create log AND config directories BEFORE writing the plist.
@@ -642,70 +548,62 @@ func installLaunchd(binPath string) error {
 		chownForUser(configDir, uidStr)
 	}
 
-	f, err := createConfigFile(plistPath)
+	desired, err := renderLaunchdDefinition(defaultLaunchdDefinition(binPath, home, productionServiceLabel))
 	if err != nil {
-		return fmt.Errorf("failed to create plist: %w", err)
+		return err
 	}
-
-	data := struct {
-		BinPath     string
-		BindAddr    string
-		LogDir      string
-		EnvPath     string
-		RecallURL   string
-		SocraticURL string
-	}{
-		BinPath:     binPath,
-		BindAddr:    config.ResolveBindAddr(""),
-		LogDir:      logDir,
-		EnvPath:     buildLaunchdPath(home),
-		RecallURL:   resolveRecallURL(),
-		SocraticURL: resolveSocraticURL(),
+	previous, readErr := os.ReadFile(plistPath) // #nosec G304 -- fixed per-user LaunchAgent definition path
+	existed := readErr == nil
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return fmt.Errorf("read previous plist: %w", readErr)
 	}
-
-	if err := tmpl.Execute(f, data); err != nil {
-		return fmt.Errorf("failed to write plist: %w", err)
-	}
-
-	// Ensure the file is flushed to disk before launchctl reads it.
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("failed to sync plist to disk: %w", err)
-	}
-	closeFileOrWarn(f, "launchd-plist")
-	// BUG-3: Check chmod error
-	if err := os.Chmod(plistPath, 0o600); err != nil {
-		fmt.Printf("  ⚠ Failed to set plist permissions: %v\n", err)
+	if err := writeFileSynced(plistPath, []byte(desired)); err != nil {
+		return fmt.Errorf("failed to atomically write plist: %w", err)
 	}
 
 	if isRoot {
 		chownForUser(plistPath, uidStr)
 	}
 
-	guiTarget := fmt.Sprintf("gui/%s", uidStr)
-	domainTarget := fmt.Sprintf("gui/%s/com.magictools.mcp-server-magictools", uidStr)
-
-	// Ensure old service is booted out first
-	if isRoot && username != "" {
-		execOrWarn("sudo", "-u", username, "launchctl", "bootout", guiTarget, plistPath)
-		execOrWarn("sudo", "-u", username, "launchctl", "bootout", domainTarget)
-	} else {
-		execOrWarn("launchctl", "bootout", guiTarget, plistPath)
-		execOrWarn("launchctl", "bootout", domainTarget)
-	}
-
-	// A6: bootstrap via timedExec so a hung launchctl cannot block install forever.
-	bootstrapArgs := []string{"launchctl", "bootstrap", guiTarget, plistPath}
-	if isRoot && username != "" {
-		bootstrapArgs = append([]string{"sudo", "-u", username}, bootstrapArgs...)
-	}
-	out, err := timedExec(bootstrapArgs[0], bootstrapArgs[1:]...)
+	ctx, cancel := serviceActionContext(context.Background())
+	defer cancel()
+	life, err := newServiceLifecycle(binPath)
 	if err != nil {
-		return fmt.Errorf("launchctl bootstrap failed: %s: %w", string(out), err)
+		return err
 	}
+	wasRunning, err := life.Running(ctx, cmdName)
+	if err != nil {
+		return err
+	}
+	if err := life.Restart(ctx); err != nil {
+		var recovery error
+		if stopErr := life.Stop(ctx, cmdName); stopErr != nil {
+			recovery = errors.Join(recovery, stopErr)
+		}
+		if existed {
+			if restoreErr := writeFileSynced(plistPath, previous); restoreErr != nil {
+				recovery = errors.Join(recovery, restoreErr)
+			}
+		} else if removeErr := os.Remove(plistPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			recovery = errors.Join(recovery, removeErr)
+		}
+		if wasRunning {
+			startErr := life.Start(ctx, cmdName)
+			if startErr == nil {
+				startErr = life.WaitHealthy(ctx, cmdName)
+			}
+			if startErr != nil {
+				recovery = errors.Join(recovery, startErr)
+			}
+		}
+		return errors.Join(fmt.Errorf("launchd install failed: %w", err), recovery)
+	}
+
+	domainTarget := fmt.Sprintf("gui/%s/%s", uidStr, productionServiceLabel)
 
 	fmt.Printf("✓ LaunchAgent installed and bootstrapped\n")
 	fmt.Printf("  Plist: %s\n", plistPath)
-	fmt.Printf("  Logs:  %s/magictools_service.log\n", logDir)
+	fmt.Printf("  Logs:  %s/magictools_debug.log\n", logDir)
 	fmt.Printf("  Check: launchctl print %s\n", domainTarget)
 	fmt.Printf("\n  ⚠ IMPORTANT DIAGNOSTICS:\n")
 	fmt.Printf("  1. If the service hangs, check System Settings > General > Login Items and ensure MagicTools is enabled.\n")
@@ -715,50 +613,42 @@ func installLaunchd(binPath string) error {
 }
 
 func uninstallLaunchd() error {
-	home, uidStr, username, err := resolveLaunchdTarget()
+	ctx, cancel := serviceActionContext(context.Background())
+	defer cancel()
+	return withServiceLock(ctx, productionServiceLabel, func(ctx context.Context) error {
+		return uninstallLaunchdLocked(ctx)
+	})
+}
+
+// launchdPlistPathFn is the uninstall path seam. Tests point it at a scratch
+// plist so an absent or running uninstall never reads the operator definition.
+var launchdPlistPathFn = launchdPlistPath
+
+func uninstallLaunchdLocked(ctx context.Context) error {
+	plistPath, err := launchdPlistPathFn()
 	if err != nil {
 		return err
 	}
-
-	plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.magictools.mcp-server-magictools.plist")
-
-	// HARD-23: Read PID before stopping
-	var stalePID int
-	statePath := filepath.Join(config.DefaultConfigDir(), "service.state")
-	if data, err := readConfigFile(statePath); err == nil {
-		var state cliServiceState
-		if json.Unmarshal(data, &state) == nil {
-			stalePID = state.PID
+	if _, err := os.Stat(plistPath); err != nil {
+		if os.IsNotExist(err) {
+			return nil
 		}
+		return err
 	}
-
-	guiTarget := fmt.Sprintf("gui/%s", uidStr)
-	domainTarget := fmt.Sprintf("gui/%s/com.magictools.mcp-server-magictools", uidStr)
-
-	currentUser, uErr := user.Current()
-	isRoot := uErr == nil && currentUser.Uid == "0"
-
-	// Unload using modern bootout
-	if isRoot && username != "" {
-		execOrWarn("sudo", "-u", username, "launchctl", "bootout", guiTarget, plistPath)
-		execOrWarn("sudo", "-u", username, "launchctl", "bootout", domainTarget)
-	} else {
-		execOrWarn("launchctl", "bootout", guiTarget, plistPath)
-		execOrWarn("launchctl", "bootout", domainTarget)
+	if err := runSharedServiceActionLocked(ctx, serviceActionStop); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
-
-	// HARD-23: Wait for process to actually exit before cleanup
-	waitForProcessExit(stalePID, 20*time.Second)
-
 	if err := os.Remove(plistPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove plist: %w", err)
 	}
-
-	cleanupServiceArtifacts()
-
+	cleanupServiceArtifactsFn()
 	fmt.Println("✓ LaunchAgent removed")
 	return nil
 }
+
+// cleanupServiceArtifactsFn is the uninstall cleanup seam. Tests replace it
+// so a scratch uninstall cannot delete the operator service.state file.
+var cleanupServiceArtifactsFn = cleanupServiceArtifacts
 
 // -------------------------------------------------------------------------
 // Windows: Service Control Manager (SCM) service — see service_windows.go
@@ -783,24 +673,17 @@ func installWindows(binPath string) error {
 }
 
 func uninstallWindows() error {
-	// HARD-23: Read PID before stopping so we can wait for actual exit.
-	var stalePID int
-	statePath := filepath.Join(config.DefaultConfigDir(), "service.state")
-	if data, err := readConfigFile(statePath); err == nil {
-		var state cliServiceState
-		if json.Unmarshal(data, &state) == nil {
-			stalePID = state.PID
-		}
-	}
-
 	// B2: stop + delete the SCM service (idempotent if absent).
 	//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
 	if err := uninstallWindowsService(); err != nil {
 		return err
 	}
 
-	// HARD-23: Wait for the process to actually exit before cleanup.
-	waitForProcessExit(stalePID, 20*time.Second)
+	ctx, cancel := serviceActionContext(context.Background())
+	defer cancel()
+	if err := runSharedServiceAction(ctx, serviceActionStop); err != nil {
+		return err
+	}
 
 	// Legacy cleanup: remove the old Task Scheduler .cmd wrapper from versions
 	// that predate the SCM service, if present.
@@ -836,30 +719,6 @@ func resolveRecallURL() string {
 // resolveSocraticURL returns the MCP_SOC_URL for socratic thinker connectivity.
 func resolveSocraticURL() string {
 	return os.Getenv("MCP_SOC_URL")
-}
-
-// waitForProcessExit waits for a process to exit, with SIGKILL escalation.
-// HARD-23: Prevents zombie service.state race where the still-draining process
-// recreates the just-deleted state file during its shutdown telemetry.
-func waitForProcessExit(pid int, timeout time.Duration) {
-	if pid <= 0 || !isProcessAlive(pid) {
-		return
-	}
-	fmt.Printf("  Waiting for process %d to exit...\n", pid)
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if !isProcessAlive(pid) {
-			fmt.Printf("  Process %d exited\n", pid)
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	// Escalate to SIGKILL after timeout
-	fmt.Printf("  Process %d did not exit within %v; sending SIGKILL\n", pid, timeout)
-	if p, err := os.FindProcess(pid); err == nil {
-		signalOrWarn(p, os.Kill)
-	}
-	time.Sleep(500 * time.Millisecond)
 }
 
 // cleanupServiceArtifacts removes ONLY service-specific state files.
@@ -910,28 +769,10 @@ var serviceStartCmd = &cobra.Command{
 				return fmt.Errorf("systemctl start failed: %s: %w", string(out), err)
 			}
 		case goOSDarwin:
-			_, uidStr, _, err := resolveLaunchdTarget()
-			if err != nil {
+			ctx, cancel := serviceActionContext(cmd.Context())
+			defer cancel()
+			if err := runSharedServiceAction(ctx, serviceActionStart); err != nil {
 				return err
-			}
-			guiTarget := fmt.Sprintf("gui/%s", uidStr)
-			domainTarget := fmt.Sprintf("gui/%s/com.magictools.mcp-server-magictools", uidStr)
-			// REV-4: Check if loaded first; use kickstart if loaded, bootstrap if not
-			if _, err := timedExec("launchctl", "print", domainTarget); err == nil {
-				out, kickErr := timedExec("launchctl", "kickstart", "-k", domainTarget)
-				if kickErr != nil {
-					return fmt.Errorf("launchctl kickstart failed: %s: %w", string(out), kickErr)
-				}
-			} else {
-				home, _, _, launchErr := resolveLaunchdTarget()
-				if launchErr != nil {
-					return fmt.Errorf("resolve launchd target: %w", launchErr)
-				}
-				plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.magictools.mcp-server-magictools.plist")
-				out, bsErr := timedExec("launchctl", "bootstrap", guiTarget, plistPath)
-				if bsErr != nil {
-					return fmt.Errorf("launchctl bootstrap failed: %s: %w", string(out), bsErr)
-				}
 			}
 		case goOSWindows:
 			//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
@@ -961,15 +802,10 @@ var serviceStopCmd = &cobra.Command{
 				return fmt.Errorf("systemctl stop failed: %s: %w", string(out), err)
 			}
 		case goOSDarwin:
-			// REV-4: Use launchctl kill (stop process, keep loaded) — NOT bootout
-			_, uidStr, _, err := resolveLaunchdTarget()
-			if err != nil {
+			ctx, cancel := serviceActionContext(cmd.Context())
+			defer cancel()
+			if err := runSharedServiceAction(ctx, serviceActionStop); err != nil {
 				return err
-			}
-			domainTarget := fmt.Sprintf("gui/%s/com.magictools.mcp-server-magictools", uidStr)
-			out, killErr := timedExec("launchctl", "kill", "SIGTERM", domainTarget)
-			if killErr != nil {
-				return fmt.Errorf("launchctl kill failed: %s: %w", string(out), killErr)
 			}
 		case goOSWindows:
 			//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
@@ -1061,10 +897,10 @@ var serviceDoctorCmd = &cobra.Command{
 				issues++
 			} else {
 				fmt.Printf("  ✓ State file: PID=%d, Addr=%s\n", state.PID, state.Addr)
-				if isProcessAlive(state.PID) {
-					fmt.Printf("  ✓ Process %d is alive\n", state.PID)
+				if _, err := readExpectedServiceState(processIdentity{}); err == nil {
+					fmt.Printf("  ✓ Process %d identity is verified\n", state.PID)
 				} else {
-					fmt.Printf("  ✗ Process %d is NOT alive (stale state)\n", state.PID)
+					fmt.Printf("  ✗ Process identity is not verified: %v\n", err)
 					issues++
 				}
 				if state.BinaryPath != "" {
@@ -1111,12 +947,27 @@ var serviceDoctorCmd = &cobra.Command{
 			}
 		case goOSDarwin:
 			home := homeDirOrDot()
-			plistPath := filepath.Join(home, "Library", "LaunchAgents", "com.magictools.mcp-server-magictools.plist")
+			plistPath := filepath.Join(home, "Library", "LaunchAgents", productionServiceLabel+".plist")
 			if _, err := os.Stat(plistPath); err != nil {
 				fmt.Printf("  ✗ LaunchAgent plist not found: %s\n", plistPath)
 				issues++
 			} else {
 				fmt.Printf("  ✓ LaunchAgent plist exists: %s\n", plistPath)
+				ctx, cancel := serviceActionContext(cmd.Context())
+				life, err := newServiceLifecycle("")
+				if err != nil {
+					issues++
+					fmt.Printf("  ✗ Lifecycle construction failed: %v\n", err)
+				} else {
+					running, runErr := life.Running(ctx, cmdName)
+					cancel()
+					if runErr != nil {
+						issues++
+						fmt.Printf("  ✗ launchd state unknown: %v\n", runErr)
+					} else {
+						fmt.Printf("  launchd running: %t\n", running)
+					}
+				}
 			}
 		case goOSWindows:
 			//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
@@ -1135,6 +986,7 @@ var serviceDoctorCmd = &cobra.Command{
 			fmt.Println("\n✓ All checks passed")
 		} else {
 			fmt.Printf("\n⚠ %d issue(s) found\n", issues)
+			return fmt.Errorf("service doctor found %d issue(s)", issues)
 		}
 		return nil
 	},
@@ -1182,13 +1034,19 @@ var serviceRestartCmd = &cobra.Command{
 		"plist/SCM registration — use it to bounce the process after a config or " +
 		"binary change without re-running install.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		// A7: reuse the platform-correct stop/start logic. A stop failure (e.g.
-		// the service was not running) must not abort the start.
-		if err := serviceStopCmd.RunE(cmd, args); err != nil {
-			fmt.Printf("⚠ stop reported: %v (continuing to start)\n", err)
-		}
-		if err := serviceStartCmd.RunE(cmd, args); err != nil {
-			return fmt.Errorf("restart failed during start: %w", err)
+		if runtime.GOOS == goOSDarwin {
+			ctx, cancel := serviceActionContext(cmd.Context())
+			defer cancel()
+			if err := runSharedServiceAction(ctx, "restart"); err != nil {
+				return err
+			}
+		} else {
+			if err := serviceStopCmd.RunE(cmd, args); err != nil {
+				fmt.Printf("⚠ stop reported: %v (continuing to start)\n", err)
+			}
+			if err := serviceStartCmd.RunE(cmd, args); err != nil {
+				return fmt.Errorf("restart failed during start: %w", err)
+			}
 		}
 		auditServiceEvent("restart", "", nil)
 		return nil

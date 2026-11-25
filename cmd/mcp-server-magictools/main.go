@@ -26,6 +26,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 
+	"github.com/maccavelli/go-selfupdate-lib/selfupdate"
 	"github.com/maccavelli/mcp-server-magictools/internal/client"
 	"github.com/maccavelli/mcp-server-magictools/internal/config"
 	"github.com/maccavelli/mcp-server-magictools/internal/db"
@@ -39,7 +40,6 @@ import (
 	"github.com/maccavelli/mcp-server-magictools/internal/util"
 	"github.com/maccavelli/mcp-server-magictools/internal/vector"
 	"github.com/maccavelli/mcplib"
-	"github.com/maccavelli/mcplib/selfupdate"
 )
 
 var (
@@ -920,7 +920,7 @@ func (app *OrchestratorApp) healthHandler(w http.ResponseWriter, r *http.Request
 		// Check for degraded state: boot completed but some sub-servers failed
 		failedServers := app.reg.GetFailedServers()
 		if len(failedServers) > 0 {
-			status = "degraded"
+			status = healthDegraded
 			// Still return 200 — orchestrator is functional, just partial
 		}
 	}
@@ -937,7 +937,7 @@ func (app *OrchestratorApp) healthHandler(w http.ResponseWriter, r *http.Request
 		Uptime:        time.Since(app.ProcessStartTime).Truncate(time.Second).String(),
 		Servers:       len(app.cfg.GetManagedServers()),
 		BootReady:     app.reg.IsSynced.Load(),
-		Degraded:      status == "degraded",
+		Degraded:      status == healthDegraded,
 		FailedServers: app.reg.GetFailedServers(),
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -952,6 +952,7 @@ type serviceState struct {
 	Started       string `json:"started"`
 	ConfigVersion string `json:"config_version"`
 	BinaryPath    string `json:"binary_path"`
+	StartToken    uint64 `json:"start_token"`
 }
 
 // writeServiceState writes the service state file for diagnostic and status checks.
@@ -963,6 +964,11 @@ func (app *OrchestratorApp) writeServiceState(addr string) {
 		Started:       time.Now().UTC().Format(time.RFC3339),
 		ConfigVersion: Version,
 		BinaryPath:    binPath,
+	}
+	if id, err := currentServiceIdentity(); err == nil {
+		state.StartToken = id.Start
+	} else {
+		slog.Warn("service state has no process identity; lifecycle readiness will not accept it", "error", err)
 	}
 
 	stateDir := config.DefaultConfigDir()

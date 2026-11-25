@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,25 +73,34 @@ func newServiceRefreshCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			receipt, err := refreshServiceDefinition()
-			if err != nil {
+			ctx := cmd.Context()
+			if ctx == nil {
+				ctx = context.Background()
+			}
+			return withServiceLock(ctx, productionServiceLabel, func(context.Context) error {
+				receipt, err := refreshServiceDefinition()
+				if err != nil {
+					return err
+				}
+				if jsonOut {
+					enc := json.NewEncoder(cmd.OutOrStdout())
+					return enc.Encode(receipt)
+				}
+				if !receipt.Changed {
+					_, err := fmt.Fprintln(cmd.ErrOrStderr(), "service definition already current")
+					return err
+				}
+				_, err = fmt.Fprintf(cmd.ErrOrStderr(), "service definition refreshed: %s\n", receipt.Path)
 				return err
-			}
-			if jsonOut {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				return enc.Encode(receipt)
-			}
-			if !receipt.Changed {
-				_, err := fmt.Fprintln(cmd.ErrOrStderr(), "service definition already current")
-				return err
-			}
-			_, err = fmt.Fprintf(cmd.ErrOrStderr(), "service definition refreshed: %s\n", receipt.Path)
-			return err
+			})
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "emit a machine-readable receipt")
 	return cmd
 }
+
+var reloadServiceDefinitionManager = reloadServiceManager
+var renderDefinitionForRefresh = renderServiceDefinition
 
 // refreshServiceDefinition rewrites an existing definition in place, keeping a
 // backup so a failed update can restore exactly what was there.
@@ -110,7 +120,7 @@ func refreshServiceDefinition() (refreshReceipt, error) {
 		return refreshReceipt{}, fmt.Errorf("read service definition: %w", err)
 	}
 
-	desired, err := renderServiceDefinition()
+	desired, err := renderDefinitionForRefresh()
 	if err != nil {
 		return refreshReceipt{}, err
 	}
@@ -125,7 +135,7 @@ func refreshServiceDefinition() (refreshReceipt, error) {
 	if err := writeFileSynced(path, []byte(desired)); err != nil {
 		return refreshReceipt{}, fmt.Errorf("write service definition: %w", err)
 	}
-	if err := reloadServiceManager(); err != nil {
+	if err := reloadServiceDefinitionManager(); err != nil {
 		// Put the old definition back before reporting: a half-applied
 		// definition is worse than an unchanged one. A failure to restore is
 		// joined so neither error is hidden.
@@ -149,29 +159,13 @@ func restoreServiceDefinition(r refreshReceipt) error {
 	if err := writeFileSynced(r.Path, data); err != nil {
 		return fmt.Errorf("restore service definition: %w", err)
 	}
-	if err := reloadServiceManager(); err != nil {
+	if err := reloadServiceDefinitionManager(); err != nil {
 		return fmt.Errorf("reload after restore: %w", err)
 	}
 	if rerr := os.Remove(r.BackupPath); rerr != nil && !os.IsNotExist(rerr) {
 		return fmt.Errorf("remove definition backup: %w", rerr)
 	}
 	return nil
-}
-
-// writeFileSynced writes and fsyncs, so a definition is durable before the
-// service manager is told to reload it.
-func writeFileSynced(path string, data []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600) // #nosec G304
-	if err != nil {
-		return err
-	}
-	if _, werr := f.Write(data); werr != nil {
-		return errors.Join(werr, f.Close())
-	}
-	if serr := f.Sync(); serr != nil {
-		return errors.Join(serr, f.Close())
-	}
-	return f.Close()
 }
 
 // renderServiceDefinition renders the definition THIS binary ships, for the
@@ -193,11 +187,6 @@ func renderServiceDefinition() (string, error) {
 	default:
 		return "", fmt.Errorf("no definition template for %s", runtime.GOOS)
 	}
-}
-
-// launchdGUITarget is the per-user launchd domain this service runs in.
-func launchdGUITarget() string {
-	return fmt.Sprintf("gui/%d", os.Getuid())
 }
 
 // renderSystemdUnit renders the unit for binPath using the same template and
@@ -233,39 +222,33 @@ func renderSystemdUnit(binPath string) (string, error) {
 // renderLaunchdPlist renders the plist for binPath using the same template and
 // the same field values the install path uses.
 func renderLaunchdPlist(binPath string) (string, error) {
-	tmpl, err := template.New("launchd").Parse(launchdPlistTemplate)
-	if err != nil {
-		return "", fmt.Errorf("parse launchd template: %w", err)
-	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("resolve home: %w", err)
 	}
-	data := struct {
-		BinPath     string
-		BindAddr    string
-		LogDir      string
-		EnvPath     string
-		RecallURL   string
-		SocraticURL string
-	}{
-		BinPath:     binPath,
-		BindAddr:    config.ResolveBindAddr(""),
-		LogDir:      filepath.Join(home, "Library", "Caches", cmdName),
-		EnvPath:     buildLaunchdPath(home),
-		RecallURL:   resolveRecallURL(),
-		SocraticURL: resolveSocraticURL(),
-	}
-	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
-		return "", fmt.Errorf("render launchd plist: %w", err)
-	}
-	return buf.String(), nil
+	return renderLaunchdDefinition(defaultLaunchdDefinition(binPath, home, "com.magictools.mcp-server-magictools"))
 }
 
 // reloadServiceManager tells the platform manager to re-read the definition.
 // launchd re-reads a plist on next bootstrap, so only systemd needs a reload.
 func reloadServiceManager() error {
+	if runtime.GOOS == goOSDarwin {
+		ctx, cancel := serviceActionContext(context.Background())
+		defer cancel()
+		life, err := newServiceLifecycle("")
+		if err != nil {
+			return err
+		}
+		running, err := life.Running(ctx, cmdName)
+		if err != nil {
+			return err
+		}
+		if running {
+			return life.Restart(ctx)
+		}
+		// A loaded-but-stopped job must consume the refreshed XML too.
+		return life.Stop(ctx, cmdName)
+	}
 	if runtime.GOOS != goOSLinux {
 		return nil
 	}

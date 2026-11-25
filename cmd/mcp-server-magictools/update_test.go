@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/maccavelli/mcplib/selfupdate"
+	"github.com/maccavelli/go-selfupdate-lib/selfupdate"
 	"github.com/spf13/cobra"
 )
 

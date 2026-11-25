@@ -86,7 +86,15 @@ The standard locations are:
 - Data: `~/Library/Application Support/mcp-server-magictools/db/`
 
 The optional service is the per-user LaunchAgent
-`com.magictools.mcp-server-magictools`.
+`com.magictools.mcp-server-magictools`, managed in the user's GUI domain. Use
+`service stop` for a persistent stop and `service start` to enable it again.
+
+To migrate an existing installation, record whether it is running and preserve
+its plist before installing the new binary. Refresh with `service install
+--force`; restart only a service that was previously running. If migration
+fails, restore the prior binary and exact plist backup, then restore only the
+original running state. Self-update uses `go-selfupdate-lib`'s managed
+two-phase replacement and follows the same state-preservation rule.
 
 ## Windows walkthrough
 

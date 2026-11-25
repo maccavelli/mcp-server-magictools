@@ -5,10 +5,11 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
-	"github.com/maccavelli/mcplib/selfupdate"
+	"github.com/maccavelli/go-selfupdate-lib/selfupdate"
 )
 
 func TestLifecycleDelegates(t *testing.T) {
@@ -156,6 +157,27 @@ func TestRefreshNeverInstallsAMissingDefinition(t *testing.T) {
 	}
 	if _, statErr := os.Stat(missing); !os.IsNotExist(statErr) {
 		t.Fatal("refresh created a definition that did not exist")
+	}
+}
+
+func TestUpdateLifecycleReusesJobAcrossStartAndHealth(t *testing.T) {
+	f := &recordingLifecycle{}
+	calls := 0
+	old := newUpdateServiceJob
+	newUpdateServiceJob = func(string) (selfupdate.Lifecycle, error) { calls++; return f, nil }
+	t.Cleanup(func() { newUpdateServiceJob = old })
+	l := &updateLifecycle{target: "/service"}
+	if err := l.Start(context.Background(), cmdName); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.WaitHealthy(context.Background(), cmdName); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("constructed %d jobs, want one", calls)
+	}
+	if want := []string{"start", "health"}; !reflect.DeepEqual(f.calls, want) {
+		t.Fatalf("calls = %v, want %v", f.calls, want)
 	}
 }
 

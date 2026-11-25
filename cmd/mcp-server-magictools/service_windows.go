@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	windowsServiceName        = "MagicToolsService"
 	windowsServiceDisplayName = "MagicTools MCP Orchestrator"
 	windowsServiceDescription = "Background MCP orchestrator service for magictools (serve mode)."
 )

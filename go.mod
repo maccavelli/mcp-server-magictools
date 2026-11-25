@@ -16,12 +16,13 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/klauspost/compress v1.20.2
+	github.com/maccavelli/go-selfupdate-lib v1.26.3
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pterm/pterm v0.12.83
 	github.com/shirou/gopsutil/v4 v4.26.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
-	golang.org/x/term v0.43.0
+	golang.org/x/term v0.47.0
 	golang.org/x/text v0.39.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -63,7 +64,7 @@ require (
 	github.com/viterin/vek v0.4.2 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/mod v0.40.0 // indirect
+	golang.org/x/mod v0.42.0 // indirect
 )
 
 require (
@@ -126,7 +127,7 @@ require (
 	golang.org/x/net v0.54.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.21.0
-	golang.org/x/sys v0.47.0
+	golang.org/x/sys v0.49.0
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 )
 
