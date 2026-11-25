@@ -36,7 +36,7 @@ func (h *OrchestratorHandler) freshRunPipelineLoop(
 
 	for i := 0; i < len(stages); i++ {
 		step := stages[i]
-		if res := freshCheckCancelled(ctx, state.results, warnings); res != nil {
+		if res := freshCheckCancelled(ctx, state.results, warnings, sessionID); res != nil {
 			return res, stages, state
 		}
 		if res := h.freshRunSingleStep(ctx, ps, sessionID, target, intent, planHash, &stages, &i, step, warnings, recallHeader, state); res != nil {
@@ -46,11 +46,11 @@ func (h *OrchestratorHandler) freshRunPipelineLoop(
 	return nil, stages, state
 }
 
-func freshCheckCancelled(ctx context.Context, results []stepResult, warnings []string) *mcp.CallToolResult {
+func freshCheckCancelled(ctx context.Context, results []stepResult, warnings []string, sessionID string) *mcp.CallToolResult {
 	select {
 	case <-ctx.Done():
 		telemetry.GlobalDAGTracker.ClosePipeline("CANCELLED")
-		return buildPipelineResult(results, "CANCELLED", warnings)
+		return buildPipelineResultWithArtifacts(results, "CANCELLED", warnings, sessionID, nil)
 	default:
 		return nil
 	}
@@ -67,6 +67,7 @@ func (h *OrchestratorHandler) freshRunSingleStep(
 	recallHeader string,
 	state *freshRunState,
 ) *mcp.CallToolResult {
+	h.countPipelineStepForTest()
 	slog.Info("execute_pipeline: executing step", "index", *i+1, "total", len(*stages), keyURN, step.ToolName, "role", step.Role, "phase", step.Phase)
 	telemetry.GlobalDAGTracker.UpdateActiveNode(step.ToolName, 0, 0, 0, "EXECUTING", "")
 
@@ -80,7 +81,7 @@ func (h *OrchestratorHandler) freshRunSingleStep(
 	freshRecordTransitionSynergy(h, *stages, *i, step, sr.Status != statusFailed)
 
 	if sr.Status == statusFailed {
-		return freshHaltOnFailure(intent, step, sr, state.results, warnings)
+		return freshHaltOnFailure(intent, step, sr, state.results, warnings, sessionID)
 	}
 	freshPruneAnchorsOnSuccess(h, step)
 	freshAppendStepOutput(state, *i, step, sr.Output, recallHeader)
@@ -100,11 +101,11 @@ func freshRecordTransitionSynergy(h *OrchestratorHandler, stages []PipelineStep,
 	h.Store.RecordSynergy(transitionHash, succeeded)
 }
 
-func freshHaltOnFailure(intent string, step PipelineStep, sr stepResult, results []stepResult, warnings []string) *mcp.CallToolResult {
+func freshHaltOnFailure(intent string, step PipelineStep, sr stepResult, results []stepResult, warnings []string, sessionID string) *mcp.CallToolResult {
 	intelligence.RecordFailureAnchor(context.Background(), step.ToolName, intent, intelligence.ClassifyError(sr.Error))
 	slog.Error("execute_pipeline: critical step failure detected, HALTING pipeline for troubleshooting", keyURN, step.ToolName, keyError, sr.Error)
 	telemetry.GlobalDAGTracker.ClosePipeline(statusFailed)
-	return buildPipelineResult(results, statusFailed, warnings)
+	return buildPipelineResultWithArtifacts(results, statusFailed, warnings, sessionID, nil)
 }
 
 func freshPruneAnchorsOnSuccess(h *OrchestratorHandler, step PipelineStep) {
@@ -257,7 +258,7 @@ func (h *OrchestratorHandler) freshRunPostLoopMutators(
 	slog.Info("execute_pipeline: post-loop MUTATOR injection (no REPORTING stages in DAG)",
 		"verdict", state.socraticVerdict, keySessionID, sessionID)
 	for _, step := range composeMutatorStages() {
-		if res := freshCheckCancelled(ctx, state.results, warnings); res != nil {
+		if res := freshCheckCancelled(ctx, state.results, warnings, sessionID); res != nil {
 			return res
 		}
 		slog.Info("execute_pipeline: executing post-loop MUTATOR step", keyURN, step.ToolName, "role", step.Role)
@@ -271,7 +272,7 @@ func (h *OrchestratorHandler) freshRunPostLoopMutators(
 		if sr.Status == statusFailed {
 			slog.Error("execute_pipeline: MUTATOR step failed", keyURN, step.ToolName, keyError, sr.Error)
 			telemetry.GlobalDAGTracker.ClosePipeline(statusFailed)
-			return buildPipelineResult(state.results, statusFailed, warnings)
+			return buildPipelineResultWithArtifacts(state.results, statusFailed, warnings, sessionID, nil)
 		}
 		freshAppendStepOutput(state, 0, step, sr.Output, recallHeader)
 	}

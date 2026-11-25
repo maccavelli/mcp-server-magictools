@@ -19,6 +19,7 @@ import (
 
 	"github.com/maccavelli/mcp-server-magictools/internal/db"
 	"github.com/maccavelli/mcp-server-magictools/internal/telemetry"
+	"github.com/maccavelli/mcp-server-magictools/internal/util"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -31,29 +32,39 @@ import (
 // verdict) and actionable fixes are detected, MUTATOR stages are dynamically
 // injected into the DAG before REPORTING and executed inline.
 
-// handleExecutePipeline composes and optionally executes a pipeline DAG.
+// handleExecutePipeline composes and optionally executes a pipeline DAG, or
+// continues/rejects a stored session (0005's D2 contract, implemented by 0013).
+// The argument gate (classifyPipelineArgs) decides the mode before any executor
+// is in reach; reject is decided first.
 func (h *OrchestratorHandler) handleExecutePipeline(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if res, ok := h.pipelineGate(); !ok {
 		return res, nil
 	}
 
-	var args struct {
-		SessionID   string   `json:"session_id"`
-		Target      string   `json:"target"`
-		Intent      string   `json:"intent"`
-		PlanHash    string   `json:"plan_hash"`
-		DryRun      bool     `json:"dry_run"`
-		TargetRoles []string `json:"target_roles"`
-	}
-	unmarshalArgsOrWarn(req.Params.Arguments, &args)
-
-	if args.Target == "" || args.Intent == "" || args.SessionID == "" {
-		res := &mcp.CallToolResult{}
-		res.Content = []mcp.Content{&mcp.TextContent{Text: "execute_pipeline requires 'target', 'intent', and 'session_id' parameters."}}
-		return res, nil
+	outcome := classifyPipelineArgs(req.Params.Arguments)
+	if outcome.mode == "refuse" {
+		return pipelineTextResult(pipelineRefusalText(outcome.reason, outcome.args)), nil
 	}
 
-	return h.freshPipeline(ctx, args.SessionID, args.Target, args.Intent, args.PlanHash, args.DryRun, args.TargetRoles)
+	switch outcome.mode {
+	case "reject":
+		return h.rejectPipelineSession(ctx, outcome.args.SessionID)
+	case "continue":
+		return h.continuePipelineSession(ctx, outcome.args.SessionID, outcome.args.PlanHash)
+	case "dry_run":
+		return h.freshPipelineDryRun(ctx, outcome.args)
+	default: // fresh
+		sessionID := outcome.args.SessionID
+		if sessionID == "" {
+			sessionID = util.GeneratePipelineSessionID()
+		}
+		return h.freshPipeline(ctx, sessionID, outcome.args.Target, outcome.args.Intent, outcome.args.PlanHash, false, outcome.args.TargetRoles)
+	}
+}
+
+// pipelineTextResult wraps a refusal or notice as a tool result.
+func pipelineTextResult(text string) *mcp.CallToolResult {
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: text}}}
 }
 
 // freshPipeline handles autonomous pipeline execution: DAG composition,

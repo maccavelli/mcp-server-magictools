@@ -55,6 +55,14 @@ type OrchestratorHandler struct {
 	Server           *mcp.Server                          // 🛡️ NOTIFICATIONS: Used to fire list_changed to IDE
 	LLMPool          *llm.Pool                            // 🛡️ LLM BACKPLANE: Shared pool for metrics surfacing (nil if disabled)
 	LazyBootGroup    singleflight.Group                   // 🛡️ SINGLEFLIGHT: Shared across all ProxyService instances for lazy-boot coalescing
+
+	// Pipeline continuation (0013): the session store, this instance's nonce,
+	// and test seams. pipelineSessions is bound lazily under pipelineSessionsOnce.
+	pipelineSessions      *db.PipelineSessionStore
+	pipelineSessionsOnce  sync.Once
+	pipelineInstanceNonce string
+	pipelineTestCountStep  func()        // test seam: counts stage executions
+	pipelineTestInjectStage *PipelineStep // test seam: injects a stage into a dry-run plan
 }
 
 // SessionStats has been removed in favor of telemetry.Tracker
