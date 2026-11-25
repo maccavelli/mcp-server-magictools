@@ -264,9 +264,9 @@ func TestPipelineSessionStore_TerminalStates(t *testing.T) {
 	ctx := context.Background()
 
 	cases := []struct {
-		status  string
+		status   string
 		complete func(context.Context, *PipelineSessionStore, string) error
-		wantErr error
+		wantErr  error
 	}{
 		{SessionCompleted, func(ctx context.Context, ps *PipelineSessionStore, id string) error {
 			return ps.Complete(ctx, id, []string{"mcp://magictools/raw/pipeline_" + id + "_plan"})
