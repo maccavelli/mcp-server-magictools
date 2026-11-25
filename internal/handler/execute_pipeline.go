@@ -58,7 +58,7 @@ func (h *OrchestratorHandler) handleExecutePipeline(ctx context.Context, req *mc
 		if sessionID == "" {
 			sessionID = util.GeneratePipelineSessionID()
 		}
-		return h.freshPipeline(ctx, sessionID, outcome.args.Target, outcome.args.Intent, outcome.args.PlanHash, false, outcome.args.TargetRoles)
+		return h.freshPipeline(ctx, sessionID, outcome.args.Target, outcome.args.Intent, outcome.args.PlanHash, outcome.args.TargetRoles)
 	}
 }
 
@@ -69,7 +69,7 @@ func pipelineTextResult(text string) *mcp.CallToolResult {
 
 // freshPipeline handles autonomous pipeline execution: DAG composition,
 // sequential stage execution, verdict-driven MUTATOR injection, and completion.
-func (h *OrchestratorHandler) freshPipeline(ctx context.Context, sessionID, target, intent, planHash string, dryRun bool, targetRoles []string) (*mcp.CallToolResult, error) {
+func (h *OrchestratorHandler) freshPipeline(ctx context.Context, sessionID, target, intent, planHash string, targetRoles []string) (*mcp.CallToolResult, error) {
 	recallContext := h.freshLoadRecallContext(ctx, target, intent)
 	normalizedIntent := strings.ToLower(strings.TrimSpace(intent))
 	pipelineRecords := h.freshGatherPipelineRecords(ctx, intent)
@@ -87,9 +87,6 @@ func (h *OrchestratorHandler) freshPipeline(ctx context.Context, sessionID, targ
 	}
 
 	freshInitDAGTelemetry(stages)
-	if dryRun {
-		return h.buildDryRunResult(target, intent, stages, warnings, recallContext.String()), nil
-	}
 
 	slog.Info("execute_pipeline: starting autonomous DAG execution",
 		keyTarget, target, "stages", len(stages), "warnings", len(warnings), "mode", "fresh")

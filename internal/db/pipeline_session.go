@@ -357,9 +357,14 @@ func (p *PipelineSessionStore) writeTxn(txn *badger.Txn, rec *PipelineSessionRec
 	return txn.SetEntry(e)
 }
 
-// OverwriteForTest replaces a stored record without a transition rule. Test
-// seam only: production code must use the transition methods.
+// OverwriteForTest replaces a stored PLANNED record without a transition rule.
+// Test seam only: it refuses any record whose stored or supplied status is not
+// PLANNED, so no running or terminal state can be rewritten through it (0005's
+// P3: no exported way to write a state without its transition rule).
 func (p *PipelineSessionStore) OverwriteForTest(ctx context.Context, rec *PipelineSessionRecord) error {
+	if rec.Status != SessionPlanned {
+		return fmt.Errorf("OverwriteForTest: supplied status %s is not PLANNED", rec.Status)
+	}
 	val, err := json.Marshal(rec)
 	if err != nil {
 		return err
@@ -369,6 +374,13 @@ func (p *PipelineSessionStore) OverwriteForTest(ctx context.Context, rec *Pipeli
 		return err
 	}
 	return p.store.UpdateWithRetryCtx(ctx, func(txn *badger.Txn) error {
+		stored, err := p.readTxn(txn, rec.SessionID)
+		if err != nil {
+			return err
+		}
+		if stored.Status != SessionPlanned {
+			return fmt.Errorf("OverwriteForTest: stored status %s is not PLANNED", stored.Status)
+		}
 		ttl := time.Until(time.Unix(rec.ExpiresAt, 0)) + tombstoneGrace
 		if ttl <= 0 {
 			ttl = tombstoneGrace
