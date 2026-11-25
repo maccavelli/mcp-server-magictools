@@ -20,6 +20,9 @@ type pipelineArgs struct {
 	Reject      *bool    `json:"reject"`
 }
 
+// pipelineModeContinue is the continuation mode name (goconst).
+const pipelineModeContinue = "continue"
+
 // pipelineGateOutcome is the pure argument gate's classification (0013 P4).
 // mode is one of "fresh", "dry_run", "continue", "reject", "refuse"; reason
 // carries the refusal vocabulary word when mode is "refuse".
@@ -71,7 +74,7 @@ func classifyPipelineArgs(raw json.RawMessage) pipelineGateOutcome {
 		// reject:false rides with a mode only when session_id is present and
 		// no fresh argument does; alone or with fresh arguments it is refused.
 		if hasSession && !hasFresh && args.DryRun == nil && len(args.TargetRoles) == 0 {
-			return pipelineGateOutcome{mode: "continue", args: args}
+			return pipelineGateOutcome{mode: pipelineModeContinue, args: args}
 		}
 		return refuse("bad_arguments")
 	}
@@ -81,7 +84,7 @@ func classifyPipelineArgs(raw json.RawMessage) pipelineGateOutcome {
 		if args.DryRun != nil || len(args.TargetRoles) > 0 {
 			return refuse("bad_arguments")
 		}
-		return pipelineGateOutcome{mode: "continue", args: args}
+		return pipelineGateOutcome{mode: pipelineModeContinue, args: args}
 	}
 
 	if hasTarget && hasIntent {
@@ -97,7 +100,7 @@ func classifyPipelineArgs(raw json.RawMessage) pipelineGateOutcome {
 
 // pipelineRefusalText renders a refusal as the tool result text. Each word of
 // the vocabulary is distinct and never a fresh run.
-func pipelineRefusalText(reason string, args pipelineArgs) string {
+func pipelineRefusalText(reason string) string {
 	switch reason {
 	case "reject_needs_session":
 		return "execute_pipeline: reject_needs_session — reject: true requires session_id and no fresh-run arguments."

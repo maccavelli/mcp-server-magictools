@@ -332,7 +332,7 @@ func TestPipelineSessionStore_PrefixIsolation(t *testing.T) {
 	}
 
 	// The stored value is compressed, not plain JSON.
-	raw, err := ps.rawValue(ctx, id)
+	raw, err := ps.rawValue(id)
 	if err != nil {
 		t.Fatalf("rawValue: %v", err)
 	}

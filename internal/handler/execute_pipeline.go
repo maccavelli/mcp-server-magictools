@@ -43,13 +43,13 @@ func (h *OrchestratorHandler) handleExecutePipeline(ctx context.Context, req *mc
 
 	outcome := classifyPipelineArgs(req.Params.Arguments)
 	if outcome.mode == "refuse" {
-		return pipelineTextResult(pipelineRefusalText(outcome.reason, outcome.args)), nil
+		return pipelineTextResult(pipelineRefusalText(outcome.reason)), nil
 	}
 
 	switch outcome.mode {
 	case "reject":
 		return h.rejectPipelineSession(ctx, outcome.args.SessionID)
-	case "continue":
+	case pipelineModeContinue:
 		return h.continuePipelineSession(ctx, outcome.args.SessionID, outcome.args.PlanHash)
 	case "dry_run":
 		return h.freshPipelineDryRun(ctx, outcome.args)

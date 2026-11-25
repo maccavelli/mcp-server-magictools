@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -192,7 +193,9 @@ func (h *OrchestratorHandler) continuePipelineSession(ctx context.Context, sessi
 	}
 
 	if claimed.PlanHash != "" && planHash != claimed.PlanHash {
-		_ = ps.Fail(ctx, sessionID)
+		if ferr := ps.Fail(ctx, sessionID); ferr != nil {
+			slog.Warn("execute_pipeline: failed to mark session failed", keySessionID, sessionID, keyError, ferr)
+		}
 		return pipelineTextResult(pipelineSessionRefusalText("plan_hash_mismatch", nil)), nil
 	}
 
@@ -200,7 +203,9 @@ func (h *OrchestratorHandler) continuePipelineSession(ctx context.Context, sessi
 	for _, stage := range claimed.Stages {
 		if h.Store != nil {
 			if tool, terr := h.Store.GetTool(stage.ToolName); terr != nil || tool == nil {
-				_ = ps.Fail(ctx, sessionID)
+				if ferr := ps.Fail(ctx, sessionID); ferr != nil {
+					slog.Warn("execute_pipeline: failed to mark session failed", keySessionID, sessionID, keyError, ferr)
+				}
 				return pipelineTextResult(pipelineSessionRefusalText("plan_stale", nil) + " Stage: " + stage.ToolName), nil
 			}
 		}
@@ -211,16 +216,22 @@ func (h *OrchestratorHandler) continuePipelineSession(ctx context.Context, sessi
 	recallCtx.WriteString(claimed.RecallContext)
 	res, runErr := h.freshPipelineExecute(ctx, sessionID, claimed.Target, claimed.Intent, claimed.PlanHash, stages, claimed.Warnings, recallCtx)
 	if runErr != nil {
-		_ = ps.Fail(ctx, sessionID)
+		if ferr := ps.Fail(ctx, sessionID); ferr != nil {
+			slog.Warn("execute_pipeline: failed to mark session failed", keySessionID, sessionID, keyError, ferr)
+		}
 		return nil, runErr
 	}
 
 	status := resultStatusOf(res)
 	if status == statusCompleted {
 		uris := artifactURIsOf(res)
-		_ = ps.Complete(ctx, sessionID, uris)
+		if cerr := ps.Complete(ctx, sessionID, uris); cerr != nil {
+			slog.Warn("execute_pipeline: failed to mark session completed", keySessionID, sessionID, keyError, cerr)
+		}
 	} else {
-		_ = ps.Fail(ctx, sessionID)
+		if ferr := ps.Fail(ctx, sessionID); ferr != nil {
+			slog.Warn("execute_pipeline: failed to mark session failed", keySessionID, sessionID, keyError, ferr)
+		}
 	}
 	return res, nil
 }
@@ -309,7 +320,9 @@ func setPlanHashForTest(ctx context.Context, p *db.PipelineSessionStore, id, has
 		return
 	}
 	rec.PlanHash = hash
-	_ = p.OverwriteForTest(ctx, rec)
+	if err := p.OverwriteForTest(ctx, rec); err != nil {
+		slog.Warn("execute_pipeline test helper: overwrite failed", keyError, err)
+	}
 }
 
 func setStagesForTest(ctx context.Context, p *db.PipelineSessionStore, id string, stages []PipelineStep) {
@@ -318,5 +331,7 @@ func setStagesForTest(ctx context.Context, p *db.PipelineSessionStore, id string
 		return
 	}
 	rec.Stages = toDBStages(stages)
-	_ = p.OverwriteForTest(ctx, rec)
+	if err := p.OverwriteForTest(ctx, rec); err != nil {
+		slog.Warn("execute_pipeline test helper: overwrite failed", keyError, err)
+	}
 }

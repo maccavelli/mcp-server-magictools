@@ -175,10 +175,10 @@ func (p *PipelineSessionStore) evictOverCap(txn *badger.Txn) error {
 // expires_at is still returned (inside the TTL grace); the transition methods
 // refuse it with ErrSessionExpired.
 func (p *PipelineSessionStore) Get(ctx context.Context, id string) (*PipelineSessionRecord, error) {
-	return p.get(ctx, id)
+	return p.readRecord(id)
 }
 
-func (p *PipelineSessionStore) get(ctx context.Context, id string) (*PipelineSessionRecord, error) {
+func (p *PipelineSessionStore) readRecord(id string) (*PipelineSessionRecord, error) {
 	var rec PipelineSessionRecord
 	err := p.store.DB.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(sessionKey(id))
@@ -206,7 +206,7 @@ func (p *PipelineSessionStore) get(ctx context.Context, id string) (*PipelineSes
 // RUNNING session was claimed by a different server instance (0005's
 // interrupted-run rule). Non-RUNNING sessions are returned unchanged.
 func (p *PipelineSessionStore) GetForInstance(ctx context.Context, id, instanceNonce string) (*PipelineSessionRecord, error) {
-	rec, err := p.get(ctx, id)
+	rec, err := p.readRecord(id)
 	if err != nil {
 		return nil, err
 	}
@@ -379,7 +379,7 @@ func (p *PipelineSessionStore) OverwriteForTest(ctx context.Context, rec *Pipeli
 
 // rawValue reads the stored compressed bytes of a session (test seam for the
 // prefix-isolation and compression assertions).
-func (p *PipelineSessionStore) rawValue(ctx context.Context, id string) ([]byte, error) {
+func (p *PipelineSessionStore) rawValue(id string) ([]byte, error) {
 	var out []byte
 	err := p.store.DB.View(func(txn *badger.Txn) error {
 		item, err := txn.Get(sessionKey(id))
