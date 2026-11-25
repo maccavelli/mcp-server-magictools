@@ -473,8 +473,15 @@ The first queued scratch run timed out before execution; its ticket was removed.
 tar extended headers, so a zip-based scratch run supplied the actual Windows result. A later combined full vet/test call
 was declined and did not run; a second final full-suite request was also declined and was not retried.
 
-Open work from the original phases: live S06-S14 and S23-S28 probes are still not in this tree. Hermetic stand-ins cover
-timeout, permission, concurrency, and uninstall. Those live probes stay open. They are not closed by the amendment.
+Live probes, 2026-11-25: `TestLaunchdLiveProbes` passed from a scratch tree with `LAUNCHD_LIVE=1` and
+`-tags=launchdlive` on macOS 27.2.1, Darwin Bootstrapper 7.0.0. The label prefix was `local.magictools.test.`. No
+production label was used. Observed: absent print is not success; absent bootout is gone; disabled bootstrap fails and
+is not classified absent; clean exit, nonzero exit, and `SIGABRT` each restarted with a different PID; disable plus
+bootout stayed down for 2 seconds; restart changed the PID; kickstart without `-k` kept the PID; another GUI domain's
+print was not classified absent; uninstall removed the helper plist and a later bootout was gone. One `bootout --wait`
+of a SIGTERM-ignoring helper blocked until a 1-second deadline with the helper still alive. A later run returned in 17
+ms because launchd had already reaped that helper. The test issued no signal to the helper PID. S26 remains the hermetic
+lock test. Full-module and race gates are still not re-run.
 
 Amendment, 2026-11-25: the owner accepted the amendment and approved P7 through P11, including commit and push to main between steps.
 
