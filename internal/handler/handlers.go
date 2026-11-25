@@ -58,10 +58,10 @@ type OrchestratorHandler struct {
 
 	// Pipeline continuation (0013): the session store, this instance's nonce,
 	// and test seams. pipelineSessions is bound lazily under pipelineSessionsOnce.
-	pipelineSessions      *db.PipelineSessionStore
-	pipelineSessionsOnce  sync.Once
-	pipelineInstanceNonce string
-	pipelineTestCountStep  func()        // test seam: counts stage executions
+	pipelineSessions        *db.PipelineSessionStore
+	pipelineSessionsOnce    sync.Once
+	pipelineInstanceNonce   string
+	pipelineTestCountStep   func()        // test seam: counts stage executions
 	pipelineTestInjectStage *PipelineStep // test seam: injects a stage into a dry-run plan
 }
 
