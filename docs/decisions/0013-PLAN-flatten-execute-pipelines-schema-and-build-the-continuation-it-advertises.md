@@ -399,6 +399,22 @@ and TTL-bound; an old binary ignores them. No migration either way.
 - Windows-host lint attempt failed on a host toolchain path issue (`C:Usersmacsmgo/bin/golangci-lint`
   not found on <windows-host>); re-run pinned to linux. Host gap, not a code finding.
 
-**Independent review:** pending (P7 step 3).
+**Independent review (2026-11-25, pass 1):** a self-review of the full diff against 0005's D2 safety
+properties found and fixed two gaps before close-out (commit `5855a94`):
+
+1. `OverwriteForTest` could rewrite any stored state, violating P3's "no exported way to write a state
+   without its transition rule". Now refuses any supplied or stored status other than PLANNED.
+2. The old `dryRun` branch inside `freshPipeline` was dead code after P5 (the gate routes dry runs to
+   `freshPipelineDryRun`); removed, and the `dryRun` parameter dropped from `freshPipeline`.
+
+Safety properties verified against 0005's D2: atomic claim (one `UpdateWithRetryCtx` transaction,
+32×200 race one winner); no re-run (every terminal state refuses a claim); pre-flight before any stage;
+reject with no executor in reach (zero-call tests); mutator gate, git checkpoint and rollback unchanged
+(the continuation runs the same `freshPipelineExecute`); fixed disclosure word-for-word; 128-bit
+server-issued ids; cap, expiry, tombstones, instance nonce all tested.
+
+**Not covered by this review:** an independent reviewer with no stake in the draft (the plan's P7 step 3
+asks for one; this pass was the implementing agent's own review). Recorded as a gap for the owner to
+assign or accept.
 
 No later phase has run yet.
