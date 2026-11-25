@@ -130,6 +130,9 @@ func TestLegacyStoppedProcessIsNotHealthy(t *testing.T) {
 	old := serviceIdentity
 	serviceIdentity = controlledIdentity{valid: true}
 	t.Cleanup(func() { serviceIdentity = old })
+	oldExpected := serviceExpectedExecutable
+	serviceExpectedExecutable = func() (string, error) { return "/service", nil }
+	t.Cleanup(func() { serviceExpectedExecutable = oldExpected })
 	writeIdentityFixture(t, cliServiceState{PID: os.Getpid(), BinaryPath: "/service"})
 	if h, err := probeServiceHealth(context.Background()); err != nil || h.Ready {
 		t.Fatalf("legacy PID state accepted: %#v %v", h, err)

@@ -364,6 +364,7 @@ Option G is not available: the library does not render this product's plist. Opt
 | Signature verification, Task Scheduler, `ReplaceBeforeStop`, `EnabledLifecycle` on the update adapter | out of scope | Checksums stay. A stopped service stays stopped. The other facilities need their own decision. |
 | Install-time plist keys | decided | Product renderer remains the install and explicit-refresh writer. It is not invoked by update reconcile. Existing round-trip tests stay. |
 | Command build, plist decoder | decided | `plistXML` and `plistXMLValue` live in a non-test file. `decodePlistDict` is the only pairing. A dict whose key count differs from its value count is an error. `go build ./...` is the proof. |
+| Health test, host plist absent | decided | `TestLegacyStoppedProcessIsNotHealthy` stubs `serviceExpectedExecutable`. It does not open the per-user LaunchAgent plist. A missing plist remains an error from the production reader. |
 
 ### Build amendment, 2026-11-25
 

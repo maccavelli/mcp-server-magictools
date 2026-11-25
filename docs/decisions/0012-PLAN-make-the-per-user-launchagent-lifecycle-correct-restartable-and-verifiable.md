@@ -357,6 +357,15 @@ CI run `45669857778` failed Darwin and Windows at `go build ./...` because `laun
 
 Exit criterion: `go build -o /dev/null ./...` passes on this Darwin host, and the binary is not executed. The existing round-trip test still passes.
 
+### P14 — Stop the legacy-health test reading the host plist
+
+CI run `45672733789` passed Linux and Windows. Darwin failed `TestLegacyStoppedProcessIsNotHealthy` because `probeServiceHealth` calls `serviceExpectedExecutable`, and on Darwin that opens the per-user LaunchAgent plist. The runner has no such file. This host does, which is why the test passed here. The fixture has no start token, so the rejection under test happens after the executable is known. The sibling health tests already stub `serviceExpectedExecutable`. Do not change the production reader to treat a missing plist as healthy.
+
+1. In `TestLegacyStoppedProcessIsNotHealthy`, set `serviceExpectedExecutable` to return the fixture binary and no error. Restore it with `t.Cleanup`.
+2. Leave the assertion: a nil error and `Ready == false`.
+
+Exit criterion: the test passes without a LaunchAgent plist at the per-user path.
+
 ### P11 — Conformance, docs, and gates
 
 1. Run `servicetest.VerifyLifecycle` against the product wrapper over a fake lab, including absent, stopped, running,
@@ -506,6 +515,7 @@ Amendment, 2026-11-25: the owner accepted the amendment and approved P7 through 
 | P11 | `servicetest.VerifyLifecycle` passed over `updateLifecycle` delegating to `servicetest.FakeService`, with 200 ms bounds. Package tests for `./cmd/mcp-server-magictools` and `./internal/testsafety` passed on this Darwin host. |
 | P12 | Completion gates, 2026-11-25. Queued `go test -count=1 ./...` passed on this Darwin host (32s) and, with `-race`, passed on this Darwin host (31s). The same command passed on the fleet Linux distro (33s) and, after the Windows refresh fix, on the fleet Windows host (74s). `go vet ./...` and `make lint` passed on this Darwin host, 0 issues. Windows refresh uses the SCM reconciler only when no on-disk definition path is reported, so a stubbed path still uses the file refresh. The installed service was not migrated. |
 | P13 | `plistXML` and `plistXMLValue` moved to `service_definition.go`. `decodePlistDict` rejects a mismatched key and value count. `launchdDefinitionProgram` and `plistValues` call it. `go build -o /dev/null ./...` passed on this Darwin host; the binary was not executed. `TestLaunchdDefinitionProgramRejectsMismatchedDict` and the existing `TestLaunchdDefinition` tests passed. |
+| P14 | `TestLegacyStoppedProcessIsNotHealthy` stubs `serviceExpectedExecutable`. It passed with `HOME` set to an empty temporary directory, so the per-user LaunchAgent plist was not present. The production reader is unchanged. |
 
 Continuation, same working tree: mismatched `SUDO_UID` is refused before path use. Lifecycle install, uninstall, refresh,
 and shared start/stop/restart take a per-label lock; a cancelled waiter does not release the holder. `launchctl` results
