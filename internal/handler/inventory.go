@@ -284,55 +284,43 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "execute_pipeline",
-    "description": "[DIRECTIVE: Pipeline Workflow Runner] Runs an orchestrated multi-stage analysis and mutation DAG from start to finish. Keywords: run-workflow-dag sequential-pipeline execute-stages workflow-orchestrator",
+    "description": "[DIRECTIVE: Pipeline Workflow Runner] Runs an orchestrated multi-stage analysis and mutation DAG. Two modes: fresh (target + intent, optional dry_run to preview and store a plan) or continuation (session_id alone to run a stored plan, session_id + reject: true to discard it). Keywords: run-workflow-dag sequential-pipeline execute-stages workflow-orchestrator",
     "category": "orchestrator",
     "inputSchema": {
       "type": "object",
       "properties": {
         "session_id": {
           "type": "string",
-          "description": "Optional CSSA session correlation ID. Auto-generated if omitted. For CONTINUATION MODE: pass session_id WITHOUT target/intent to resume a paused pipeline after human approval."
+          "description": "Pipeline session id. On a fresh call: optional correlation label (a dry run always issues its own server id). To continue a stored plan: pass the issued session_id alone. To discard it: pass session_id with reject: true."
         },
         "target": {
           "type": "string",
-          "description": "Absolute path to the project root or package to analyze and refactor."
+          "description": "Absolute path to the project root or package to analyze and refactor. Required for a fresh run (with intent); omit when continuing with session_id."
         },
         "intent": {
           "type": "string",
-          "description": "The goal/objective of the pipeline run."
+          "description": "The goal/objective of the pipeline run. Required for a fresh run (with target); omit when continuing with session_id."
         },
         "plan_hash": {
           "type": "string",
-          "description": "Optional SHA-256 hash of an approved implementation plan for MUTATOR integrity verification."
+          "description": "Optional SHA-256 hash of an approved implementation plan for MUTATOR integrity verification. On a continuation it must equal the stored plan_hash, if any."
         },
         "dry_run": {
           "type": "boolean",
-          "description": "When true, return the DAG plan as markdown without executing. Equivalent to the old compose_pipeline preview."
+          "description": "When true on a fresh run, compose and store the plan without executing it; returns the issued session_id and the approval disclosure. Not accepted on a continuation."
         },
         "target_roles": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "Optional role filter (e.g. ['ANALYZER', 'CRITIC']). Only tools matching these roles enter the DAG."
+          "description": "Optional role filter (e.g. ['ANALYZER', 'CRITIC']) for a fresh run. Only tools matching these roles enter the DAG. Not accepted on a continuation."
         },
         "reject": {
           "type": "boolean",
-          "description": "Set to true when continuing a paused pipeline to reject the plan and abort without mutations."
+          "description": "Set to true with session_id to discard a stored plan; nothing runs. Requires session_id and no fresh-run arguments."
         }
       },
       "additionalProperties": false,
-      "anyOf": [
-        {
-          "required": [
-            "target",
-            "intent"
-          ]
-        },
-        {
-          "required": [
-            "session_id"
-          ]
-        }
-      ]
+      "minProperties": 1
     }
   },
   {

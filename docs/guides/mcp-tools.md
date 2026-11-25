@@ -72,9 +72,16 @@ they return a `pipeline_disabled` result.
 
 The `execute_pipeline` safety flow is intentionally two-stage:
 
-1. Submit `intent`, `target`, and `dry_run: true` to generate a paused plan.
-2. Review the plan and either continue using its `session_id`, or reject it by
-   sending the `session_id` with `reject: true`.
+1. Submit `intent`, `target`, and `dry_run: true` to compose and store a plan.
+   The result returns a server-issued `session_id`, its 24-hour expiry, and the
+   approval disclosure: approval covers the analysis stages, not file writes.
+   Mutating stages are added at run time, after the reporting stage, when the
+   Socratic verdict and the analysis call for them. A plan holding a mutating
+   stage is shown but not stored.
+2. Review the plan and either continue using its `session_id` alone, or reject
+   it by sending the `session_id` with `reject: true`. A continuation runs the
+   exact stored plan; a repeated continuation never re-runs. A stored plan whose
+   tool no longer resolves is refused before anything runs (`plan_stale`).
 
 The `pipeline-start` MCP prompt instructs the client to preserve structured
 artifact paths and obtain explicit user confirmation of intent, target, and
