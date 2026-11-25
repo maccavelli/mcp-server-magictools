@@ -616,9 +616,7 @@ func installLaunchdLocked(binPath string) error {
 func uninstallLaunchd() error {
 	ctx, cancel := serviceActionContext(context.Background())
 	defer cancel()
-	return withServiceLock(ctx, productionServiceLabel, func(ctx context.Context) error {
-		return uninstallLaunchdLocked(ctx)
-	})
+	return withServiceLock(ctx, productionServiceLabel, uninstallLaunchdLocked)
 }
 
 // launchdPlistPathFn is the uninstall path seam. Tests point it at a scratch

@@ -106,10 +106,10 @@ var renderDefinitionForRefresh = renderServiceDefinition
 // refreshServiceDefinition rewrites an existing definition in place, keeping a
 // backup so a failed update can restore exactly what was there.
 func refreshServiceDefinition() (refreshReceipt, error) {
-	if runtime.GOOS == goOSWindows {
+	path, expected := serviceDefinitionPath()
+	if runtime.GOOS == goOSWindows && !expected {
 		return refreshWindowsService()
 	}
-	path, expected := serviceDefinitionPath()
 	if !expected {
 		// Windows and unsupported platforms: nothing on disk to rewrite. The
 		// service manager configuration is left untouched rather than guessed.

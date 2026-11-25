@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 date: 2026-11-25
 associated-madr: "0012-MADR-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md"
 ---
@@ -453,7 +453,7 @@ preserve the tree, amend the MADR/PLAN, and await re-approval.
 ## Execution record
 
 The owner accepted the MADR and approved execution on 2026-11-25, including adoption of go-selfupdate-lib v1.26.3.
-Implementation is in progress; this is not a completion claim.
+The gates below are the completion record. The installed service was not migrated.
 
 | Phase | Evidence and result |
 | --- | --- |
@@ -491,7 +491,8 @@ Amendment, 2026-11-25: the owner accepted the amendment and approved P7 through 
 | P8 | One job is passed through stop and restart. `Options.Runner` is the product runner. `Settle` is unset. Bootout exits 3, 36, and 113 are gone. Operator stop still disables first. |
 | P9 | Update reconcile and restore delegate to the job. Update does not spawn `service refresh`. Explicit Darwin reload calls that job's `Stop` and then bootstrap on the shared runner. It does not disable or kickstart. The library's `reload` is unexported, so this is the public equivalent. Windows refresh uses `scm.Service.Reconcile` when a service is installed. |
 | P10 | Linux and Windows start, stop, and restart use the shared controller. Darwin status and doctor read `Job.Status` through a seam. `LoadHandOffEnv` runs at process start. `HandOffIfInside` runs before `Updater.Run` when a definition exists. |
-| P11 | `servicetest.VerifyLifecycle` passed over `updateLifecycle` delegating to `servicetest.FakeService`, with 200 ms bounds. Package tests for `./cmd/mcp-server-magictools` and `./internal/testsafety` passed on this Darwin host. Live S06-S14 and S23-S28 probes remain open. Full-module and race gates were not re-run. |
+| P11 | `servicetest.VerifyLifecycle` passed over `updateLifecycle` delegating to `servicetest.FakeService`, with 200 ms bounds. Package tests for `./cmd/mcp-server-magictools` and `./internal/testsafety` passed on this Darwin host. |
+| P12 | Completion gates, 2026-11-25. Queued `go test -count=1 ./...` passed on this Darwin host (32s) and, with `-race`, passed on this Darwin host (31s). The same command passed on the fleet Linux distro (33s) and, after the Windows refresh fix, on the fleet Windows host (74s). `go vet ./...` and `make lint` passed on this Darwin host, 0 issues. Windows refresh uses the SCM reconciler only when no on-disk definition path is reported, so a stubbed path still uses the file refresh. The installed service was not migrated. |
 
 Continuation, same working tree: mismatched `SUDO_UID` is refused before path use. Lifecycle install, uninstall, refresh,
 and shared start/stop/restart take a per-label lock; a cancelled waiter does not release the holder. `launchctl` results

@@ -20,30 +20,38 @@ type managerObservation struct {
 	Err        error
 }
 
+const managerUnknown = "unknown"
+
 var observeManager = observeManagerStatus
+
+func unknownManager(err error) managerObservation {
+	return managerObservation{Enabled: managerUnknown, Process: managerUnknown, Err: err}
+}
 
 func observeManagerStatus(ctx context.Context) managerObservation {
 	if runtime.GOOS != goOSDarwin {
 		registered, err := definitionRegistered()
-		return managerObservation{Registered: registered, Enabled: "unknown", Process: "unknown", Err: err}
+		observed := unknownManager(err)
+		observed.Registered = registered
+		return observed
 	}
 	life, err := newServiceLifecycle("")
 	if err != nil {
-		return managerObservation{Enabled: "unknown", Process: "unknown", Err: err}
+		return unknownManager(err)
 	}
 	platform, ok := life.(*platformServiceLifecycle)
 	if !ok {
-		return managerObservation{Enabled: "unknown", Process: "unknown", Err: errors.New("launchd status requires the platform job")}
+		return unknownManager(errors.New("launchd status requires the platform job"))
 	}
 	statter, ok := platform.job.(interface {
 		Status(context.Context, string) (launchd.Status, error)
 	})
 	if !ok {
-		return managerObservation{Enabled: "unknown", Process: "unknown", Err: errors.New("launchd job has no status")}
+		return unknownManager(errors.New("launchd job has no status"))
 	}
 	st, err := statter.Status(ctx, cmdName)
 	if err != nil {
-		return managerObservation{Enabled: "unknown", Process: "unknown", Err: err}
+		return unknownManager(err)
 	}
 	process := "stopped"
 	if st.Running {
@@ -69,10 +77,10 @@ func buildServiceStatus(state cliServiceState, readErr error, mgr managerObserva
 	}
 	enabled, process := mgr.Enabled, mgr.Process
 	if enabled == "" {
-		enabled = "unknown"
+		enabled = managerUnknown
 	}
 	if process == "" {
-		process = "unknown"
+		process = managerUnknown
 	}
 	return map[string]any{
 		"status": status, "ready": alive, "pid": state.PID, "addr": state.Addr,

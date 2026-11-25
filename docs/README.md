@@ -38,7 +38,7 @@ This tree holds three kinds of document:
 | 0011 | MADR | [0011-MADR-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md](decisions/0011-MADR-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md) | accepted |
 | 0011 | PLAN | [0011-PLAN-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md](decisions/0011-PLAN-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md) | implemented |
 | 0012 | MADR | [0012-MADR-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md](decisions/0012-MADR-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md) | accepted |
-| 0012 | PLAN | [0012-PLAN-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md](decisions/0012-PLAN-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md) | in-progress |
+| 0012 | PLAN | [0012-PLAN-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md](decisions/0012-PLAN-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md) | implemented |
 
 ## I want to…
 
