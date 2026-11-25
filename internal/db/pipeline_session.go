@@ -357,6 +357,26 @@ func (p *PipelineSessionStore) writeTxn(txn *badger.Txn, rec *PipelineSessionRec
 	return txn.SetEntry(e)
 }
 
+// OverwriteForTest replaces a stored record without a transition rule. Test
+// seam only: production code must use the transition methods.
+func (p *PipelineSessionStore) OverwriteForTest(ctx context.Context, rec *PipelineSessionRecord) error {
+	val, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	compressed, err := util.Compress(val)
+	if err != nil {
+		return err
+	}
+	return p.store.UpdateWithRetryCtx(ctx, func(txn *badger.Txn) error {
+		ttl := time.Until(time.Unix(rec.ExpiresAt, 0)) + tombstoneGrace
+		if ttl <= 0 {
+			ttl = tombstoneGrace
+		}
+		return txn.SetEntry(badger.NewEntry(sessionKey(rec.SessionID), compressed).WithTTL(ttl))
+	})
+}
+
 // rawValue reads the stored compressed bytes of a session (test seam for the
 // prefix-isolation and compression assertions).
 func (p *PipelineSessionStore) rawValue(ctx context.Context, id string) ([]byte, error) {
