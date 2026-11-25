@@ -14,7 +14,7 @@ import (
 )
 
 func newPlatformJob() (selfupdate.Lifecycle, error) {
-	poll := service.PollOptions{Timeout: healthTimeout, Settle: -1}
+	poll := servicePollOptions()
 	switch runtime.GOOS {
 	case goOSLinux:
 		return systemd.New(systemd.Options{Unit: cmdName + ".service", Scope: systemd.User, Probe: probeServiceHealth, Poll: poll})
@@ -25,6 +25,6 @@ func newPlatformJob() (selfupdate.Lifecycle, error) {
 	}
 }
 
-func stopLaunchdPersistent(context.Context, string, bool) error {
+func stopLaunchdPersistent(context.Context, string, bool, selfupdate.Lifecycle) error {
 	return fmt.Errorf("launchd lifecycle requires darwin")
 }

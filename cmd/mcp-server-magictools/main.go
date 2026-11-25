@@ -27,6 +27,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/maccavelli/go-selfupdate-lib/selfupdate"
+	"github.com/maccavelli/go-selfupdate-lib/selfupdate/service"
 	"github.com/maccavelli/mcp-server-magictools/internal/client"
 	"github.com/maccavelli/mcp-server-magictools/internal/config"
 	"github.com/maccavelli/mcp-server-magictools/internal/db"
@@ -88,6 +89,10 @@ type OrchestratorApp struct {
 }
 
 func main() {
+	if err := service.LoadHandOffEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		exitFunc(1)
+	}
 	processStartTime := time.Now()
 	// 🛡️ [BOILERPLATE] Standard I/O Redirection
 	realStdin = os.Stdin

@@ -277,6 +277,98 @@ Exit criterion: docs match implemented behavior and commands; no documentation s
 
 Exit criterion: all decided rows tested, all planted regressions caught, all gates green, no blocker, and no unapproved scope expansion.
 
+## Amendment implementation steps
+
+Amendment, 2026-11-25, proposed: P7 through P11 below implement the MADR's adoption amendment. They are not approved
+for execution. Do not start them on the strength of the earlier execution approval.
+
+### P7 — Re-ground the adoption gaps
+
+1. Re-read `go-selfupdate-lib` v1.26.3 `Job.Reconcile`, `Restore`, `reload`, `Stop`, `WaitHealthy`, `Status`,
+   `HandOffIfInside`, and the systemd and SCM equivalents. Amend line references if HEAD is not `31218e1`.
+2. Pin A1 through A8 with characterization tests against the current tree before changing it: update refresh rewrites a
+   matching plist; refresh of a non-running job disables; restart uses two jobs; `Settle` is negative; Linux start does
+   not call the shared controller.
+
+Exit criterion: each A1 through A8 row is either reproduced by a named test or withdrawn with evidence. No production
+label is used.
+
+### P8 — One job, one runner, library settle
+
+1. Construct one platform job for an operation and pass that value to stop, start, wait, and reconcile.
+2. Set `Options.Runner` to the product runner. Delete the separate launchctl path except `disable`, which must use that
+   same runner and the job's target.
+3. Call `disable` only from operator stop. Restart, update stop, refresh, and reload must not call it.
+4. Remove `Poll.Settle: -1` on Darwin, Linux, and Windows. Do not set a settle below the library default.
+5. Treat library bootout exits 0, 3, 36, and 113 as gone. Do not keep a product classifier that disagrees.
+
+Tests: operator stop disables then stops the same job; restart and update do not disable; `WaitHealthy` rejects the
+previous PID; a ready observation that dies inside the settle window fails. Plants: a second job, a private runner, a
+negative settle, and a refresh that disables.
+
+Exit criterion: one job and one runner per operation; disable is confined to operator stop; settle is the library default.
+
+### P9 — Library plist reconcile, reload, and restore
+
+1. Point the managed installer's reconciler at the platform job's `Reconcile` and `Restore`. Do not spawn
+   `service refresh` from update.
+2. Leave `RewritePath` unset unless a later approved change says the binary path may move. A mismatch returns
+   `service.ErrBinaryMismatch` and does not edit the file.
+3. Keep the product renderer for install and for an explicit `service refresh`. Explicit refresh writes the policy,
+   then reloads through the library: bootout, wait, bootstrap. It does not kickstart and it does not disable.
+4. Use the job's plist path everywhere a definition is read or written. Remove the `os.UserHomeDir` plist path.
+5. On Windows, call `scm.Service.Reconcile`. Delete the success result that means the definition is absent while a
+   service is installed.
+
+Tests: matching path is unchanged; mismatch is `ErrBinaryMismatch`; rewrite, when enabled in a test double, preserves
+mode and owner and refuses a running job; restore returns the previous bytes; explicit refresh reloads without disable.
+Plants: a full-plist rewrite on update, a disable during reload, a second home resolver.
+
+Exit criterion: update reconcile is the library reconciler; explicit refresh is the only product rewrite; reload cannot
+persist a disable.
+
+### P10 — Shared controller, status, and handoff
+
+1. Route Linux and Windows `service start`, `service stop`, and `service restart` through the shared controller. Remove
+   the direct `systemctl` start and stop on those commands, and the parallel Windows start and stop. Install and
+   uninstall of the unit or SCM registration stay product-owned.
+2. Fill Darwin status and doctor from `Job.Status` plus the product health probe. Keep the old JSON fields. Add the
+   library observations without parsing `print` text in product code. Doctor stays nonzero for actionable failures.
+3. At process start, call `service.LoadHandOffEnv`. Before `Updater.Run`, call `service.HandOffIfInside` with the
+   platform job as the detacher. A handed-off run returns the detached result. A second handoff does not recurse.
+4. Do not add `EnabledLifecycle` to the update adapter. Do not set `ReplaceBeforeStop`. Do not add a signature verifier.
+
+Tests: Linux and Windows command argv goes to the fake job and waits for health; status fields come from the fake
+`Status`; inside-service update detaches once; outside-service update does not. Plants: a direct `systemctl start` on
+the command path, a product `print-disabled` parser, a recursive handoff.
+
+Exit criterion: interactive control and update control share the library job on every supported platform; handoff is
+used only when the process is inside the service.
+
+### P11 — Conformance, docs, and gates
+
+1. Run `servicetest.VerifyLifecycle` against the product wrapper over a fake lab, including absent, stopped, running,
+   slow stop, and a start that never becomes healthy.
+2. Update the service guide: update does not rewrite a matching plist; explicit refresh does; stop is the persistent
+   disable; health waits at least 10 seconds; status fields name their source.
+3. Re-run the hermetic package tests, `make check-records`, and `make markdownlint`. Full-module, race, and live-helper
+   gates stay on the fleet hosts and must not target the production label.
+4. Record results in this execution record. Do not mark the plan implemented while a decided amendment row lacks proof,
+   or while the original live S06-S14 and S23-S28 probes remain open.
+
+Exit criterion: conformance violations are zero or recorded as amendment deviations; docs match the amendment; no
+production service was mutated.
+
+### Amendment traceability
+
+| IDs | MADR amendment rows | Phases |
+| --- | --- | --- |
+| A1, A2, A7 | Matching reconcile, reload without disable, one plist path | P7, P9 |
+| A3, A4 | One job, one runner, library settle, operator-only disable | P7, P8 |
+| A5, A6, A8 | Status, Linux and Windows commands, Windows reconcile, handoff | P10 |
+| — | Conformance and docs | P11 |
+
+
 ## State-matrix traceability
 
 S-numbers below map one-to-one to the MADR’s 29 decided rows in order. No row is satisfied solely by a unit test where the
@@ -381,10 +473,18 @@ The first queued scratch run timed out before execution; its ticket was removed.
 tar extended headers, so a zip-based scratch run supplied the actual Windows result. A later combined full vet/test call
 was declined and did not run; a second final full-suite request was also declined and was not retried.
 
-Open work: live S06-S14 and S23-S28 probes (clean exit, nonzero exit, crash, drain timeout, disabled job, absent GUI
-domain, uninstall of a helper the test started) are still not in this tree. Hermetic stand-ins now cover timeout,
-permission, concurrency, and uninstall. No commit, push, installed-service mutation, or production update has been
-performed.
+Open work from the original phases: live S06-S14 and S23-S28 probes are still not in this tree. Hermetic stand-ins cover
+timeout, permission, concurrency, and uninstall. Those live probes stay open. They are not closed by the amendment.
+
+Amendment, 2026-11-25: the owner accepted the amendment and approved P7 through P11, including commit and push to main between steps.
+
+| Phase | Evidence and result |
+| --- | --- |
+| P7 | Gaps A1 through A8 re-read at `31218e1` against v1.26.3. Replacement tests now pin the corrected contract rather than the old defects. |
+| P8 | One job is passed through stop and restart. `Options.Runner` is the product runner. `Settle` is unset. Bootout exits 3, 36, and 113 are gone. Operator stop still disables first. |
+| P9 | Update reconcile and restore delegate to the job. Update does not spawn `service refresh`. Explicit Darwin reload calls that job's `Stop` and then bootstrap on the shared runner. It does not disable or kickstart. The library's `reload` is unexported, so this is the public equivalent. Windows refresh uses `scm.Service.Reconcile` when a service is installed. |
+| P10 | Linux and Windows start, stop, and restart use the shared controller. Darwin status and doctor read `Job.Status` through a seam. `LoadHandOffEnv` runs at process start. `HandOffIfInside` runs before `Updater.Run` when a definition exists. |
+| P11 | `servicetest.VerifyLifecycle` passed over `updateLifecycle` delegating to `servicetest.FakeService`, with 200 ms bounds. Package tests for `./cmd/mcp-server-magictools` and `./internal/testsafety` passed on this Darwin host. Live S06-S14 and S23-S28 probes remain open. Full-module and race gates were not re-run. |
 
 Continuation, same working tree: mismatched `SUDO_UID` is refused before path use. Lifecycle install, uninstall, refresh,
 and shared start/stop/restart take a per-label lock; a cancelled waiter does not release the holder. `launchctl` results

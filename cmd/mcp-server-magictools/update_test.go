@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -167,57 +167,56 @@ func TestUpdatePlatformsAreTheFrozenMatrix(t *testing.T) {
 
 // --- reconciler ------------------------------------------------------------
 
-func TestReconcilerCapturesReceipt(t *testing.T) {
-	want := refreshReceipt{Changed: true, Path: "/u/x.service", BackupPath: "/u/x.service.prev", Detail: "definition rewritten"}
-	body, _ := json.Marshal(want)
-	r := &updateReconciler{runFn: func(context.Context, string) ([]byte, error) { return body, nil }}
+type fakeReconciler struct {
+	recordingLifecycle
+	result       selfupdate.ReconcileResult
+	reconcileErr error
+	restoreErr   error
+	restored     selfupdate.ReconcileResult
+}
 
-	res, err := r.Reconcile(context.Background(), cmdName, "/bin/x")
+func (f *fakeReconciler) Reconcile(context.Context, string, string) (selfupdate.ReconcileResult, error) {
+	f.calls = append(f.calls, "reconcile")
+	return f.result, f.reconcileErr
+}
+func (f *fakeReconciler) Restore(_ context.Context, _ string, receipt selfupdate.ReconcileResult) error {
+	f.calls = append(f.calls, "restore")
+	f.restored = receipt
+	return f.restoreErr
+}
+
+func TestUpdateReconcileDelegatesToTheJob(t *testing.T) {
+	f := &fakeReconciler{result: selfupdate.ReconcileResult{Changed: false, Detail: "already current"}}
+	l := &updateLifecycle{job: f}
+	res, err := l.Reconcile(context.Background(), cmdName, "/bin/x")
 	if err != nil {
-		t.Fatalf("Reconcile = %v", err)
+		t.Fatal(err)
 	}
-	if !res.Changed || res.Detail != want.Detail {
+	if res.Changed || res.Detail != "already current" {
 		t.Fatalf("result = %+v", res)
 	}
-	got, ok := res.State.(refreshReceipt)
-	if !ok || got != want {
-		t.Fatalf("receipt = %+v (ok=%v), want %+v", got, ok, want)
+	if !reflect.DeepEqual(f.calls, []string{"reconcile"}) {
+		t.Fatalf("calls = %v", f.calls)
 	}
 }
 
-// TestReconcilerFailureIsFatal proves a refresh failure surfaces as an error
-// so the shared rollback path runs, rather than being logged as a warning.
-func TestReconcilerFailureIsFatal(t *testing.T) {
-	r := &updateReconciler{runFn: func(context.Context, string) ([]byte, error) {
-		return nil, errors.New("refresh exploded")
-	}}
-	if _, err := r.Reconcile(context.Background(), cmdName, "/bin/x"); err == nil {
-		t.Fatal("a refresh failure must be fatal")
+func TestUpdateReconcileFailureIsFatal(t *testing.T) {
+	probe := errors.New("binary mismatch")
+	l := &updateLifecycle{job: &fakeReconciler{reconcileErr: probe}}
+	if _, err := l.Reconcile(context.Background(), cmdName, "/bin/x"); !errors.Is(err, probe) {
+		t.Fatalf("err = %v", err)
 	}
 }
 
-func TestReconcilerRejectsMalformedReceipt(t *testing.T) {
-	r := &updateReconciler{runFn: func(context.Context, string) ([]byte, error) {
-		return []byte("not json"), nil
-	}}
-	if _, err := r.Reconcile(context.Background(), cmdName, "/bin/x"); err == nil {
-		t.Fatal("a malformed receipt must be an error")
+func TestUpdateRestoreDelegatesForeignReceipt(t *testing.T) {
+	probe := errors.New("foreign receipt")
+	f := &fakeReconciler{restoreErr: probe}
+	l := &updateLifecycle{job: f}
+	receipt := selfupdate.ReconcileResult{Changed: true, State: "not a receipt"}
+	if err := l.Restore(context.Background(), cmdName, receipt); !errors.Is(err, probe) {
+		t.Fatalf("err = %v", err)
 	}
-}
-
-func TestReconcilerRestoreSkipsUnchanged(t *testing.T) {
-	r := &updateReconciler{}
-	if err := r.Restore(context.Background(), cmdName, selfupdate.ReconcileResult{Changed: false}); err != nil {
-		t.Fatalf("Restore = %v", err)
-	}
-}
-
-// TestReconcilerRestoreRejectsForeignReceipt refuses to report a rollback it
-// did not perform.
-func TestReconcilerRestoreRejectsForeignReceipt(t *testing.T) {
-	r := &updateReconciler{}
-	err := r.Restore(context.Background(), cmdName, selfupdate.ReconcileResult{Changed: true, State: "not a receipt"})
-	if err == nil {
-		t.Fatal("expected an error for a foreign receipt")
+	if f.restored != receipt {
+		t.Fatalf("restored = %+v", f.restored)
 	}
 }

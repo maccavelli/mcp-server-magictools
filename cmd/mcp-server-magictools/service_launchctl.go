@@ -56,14 +56,13 @@ func classifyLaunchctl(args []string, exit int, stderr string, runErr error) err
 }
 
 func launchctlBootoutAbsent(args []string, exit int) bool {
-	if exit != launchctlAbsentBootout || len(args) == 0 || args[0] != "bootout" {
+	if len(args) == 0 || args[0] != "bootout" {
 		return false
 	}
-	for _, arg := range args[1:] {
-		if arg == "--wait" {
-			continue
-		}
+	switch exit {
+	case launchctlAbsentBootout, 36, 113:
 		return true
+	default:
+		return false
 	}
-	return false
 }

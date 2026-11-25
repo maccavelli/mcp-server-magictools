@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"text/template"
 
+	"github.com/maccavelli/go-selfupdate-lib/selfupdate"
 	"github.com/spf13/cobra"
 
 	"github.com/maccavelli/mcp-server-magictools/internal/config"
@@ -44,11 +45,11 @@ func platformServiceDefinitionPath() (string, bool) {
 		}
 		return filepath.Join(home, ".config", "systemd", "user", cmdName+".service"), true
 	case goOSDarwin:
-		home, err := os.UserHomeDir()
+		path, err := launchdPlistPathFn()
 		if err != nil {
 			return "", false
 		}
-		return filepath.Join(home, "Library", "LaunchAgents", "com."+cmdName+".plist"), true
+		return path, true
 	case goOSWindows:
 		// The Windows definition lives in the service control manager, not on
 		// disk. The refresh path handles it through mgr.Config.
@@ -105,6 +106,9 @@ var renderDefinitionForRefresh = renderServiceDefinition
 // refreshServiceDefinition rewrites an existing definition in place, keeping a
 // backup so a failed update can restore exactly what was there.
 func refreshServiceDefinition() (refreshReceipt, error) {
+	if runtime.GOOS == goOSWindows {
+		return refreshWindowsService()
+	}
 	path, expected := serviceDefinitionPath()
 	if !expected {
 		// Windows and unsupported platforms: nothing on disk to rewrite. The
@@ -168,6 +172,35 @@ func restoreServiceDefinition(r refreshReceipt) error {
 	return nil
 }
 
+func refreshWindowsService() (refreshReceipt, error) {
+	ctx, cancel := serviceActionContext(context.Background())
+	defer cancel()
+	job, err := newPlatformJob()
+	if err != nil {
+		return refreshReceipt{}, err
+	}
+	installed, err := job.Installed(ctx, cmdName)
+	if err != nil {
+		return refreshReceipt{}, err
+	}
+	if !installed {
+		return refreshReceipt{Changed: false, Detail: "no installed service"}, nil
+	}
+	rec, ok := job.(selfupdate.Reconciler)
+	if !ok {
+		return refreshReceipt{}, errors.New("windows service job is not a reconciler")
+	}
+	bin, err := os.Executable()
+	if err != nil {
+		return refreshReceipt{}, err
+	}
+	result, err := rec.Reconcile(ctx, cmdName, bin)
+	if err != nil {
+		return refreshReceipt{}, err
+	}
+	return refreshReceipt{Changed: result.Changed, Detail: result.Detail}, nil
+}
+
 // renderServiceDefinition renders the definition THIS binary ships, for the
 // executable this process is running as. It reuses the same templates the
 // install path uses, so a refresh and a fresh install can never drift.
@@ -222,11 +255,11 @@ func renderSystemdUnit(binPath string) (string, error) {
 // renderLaunchdPlist renders the plist for binPath using the same template and
 // the same field values the install path uses.
 func renderLaunchdPlist(binPath string) (string, error) {
-	home, err := os.UserHomeDir()
+	home, _, err := resolveLaunchdTargetFn()
 	if err != nil {
 		return "", fmt.Errorf("resolve home: %w", err)
 	}
-	return renderLaunchdDefinition(defaultLaunchdDefinition(binPath, home, "com.magictools.mcp-server-magictools"))
+	return renderLaunchdDefinition(defaultLaunchdDefinition(binPath, home, productionServiceLabel))
 }
 
 // reloadServiceManager tells the platform manager to re-read the definition.
@@ -235,19 +268,7 @@ func reloadServiceManager() error {
 	if runtime.GOOS == goOSDarwin {
 		ctx, cancel := serviceActionContext(context.Background())
 		defer cancel()
-		life, err := newServiceLifecycle("")
-		if err != nil {
-			return err
-		}
-		running, err := life.Running(ctx, cmdName)
-		if err != nil {
-			return err
-		}
-		if running {
-			return life.Restart(ctx)
-		}
-		// A loaded-but-stopped job must consume the refreshed XML too.
-		return life.Stop(ctx, cmdName)
+		return reloadLaunchdDefinition(ctx)
 	}
 	if runtime.GOOS != goOSLinux {
 		return nil

@@ -87,7 +87,7 @@ var defaultAllowlist = slices.Concat(
 
 	// S6 to S8: service control, reached by no test.
 	group("cmd/mcp-server-magictools/service.go", "S6", "service control by the platform manager",
-		u(primCmdSystemctl, 11)),
+		u(primCmdSystemctl, 9)),
 	group("cmd/mcp-server-magictools/service_refresh.go", "S6", "daemon-reload", u(primCmdSystemctl, 1)),
 	group("cmd/mcp-server-magictools/io_helpers.go", "S6", "bounded systemd daemon reload and disable",
 		u(primCmdSystemctl, 2)),

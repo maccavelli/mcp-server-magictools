@@ -1,16 +1,65 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"os"
 	"runtime"
+	"strconv"
+
+	"github.com/maccavelli/go-selfupdate-lib/selfupdate/service/launchd"
 )
+
+// managerObservation is what the library job reports. Enabled is the library's
+// own reading. This package does not parse launchctl print or print-disabled.
+type managerObservation struct {
+	Registered bool
+	Loaded     bool
+	Enabled    string
+	Process    string
+	Err        error
+}
+
+var observeManager = observeManagerStatus
+
+func observeManagerStatus(ctx context.Context) managerObservation {
+	if runtime.GOOS != goOSDarwin {
+		registered, err := definitionRegistered()
+		return managerObservation{Registered: registered, Enabled: "unknown", Process: "unknown", Err: err}
+	}
+	life, err := newServiceLifecycle("")
+	if err != nil {
+		return managerObservation{Enabled: "unknown", Process: "unknown", Err: err}
+	}
+	platform, ok := life.(*platformServiceLifecycle)
+	if !ok {
+		return managerObservation{Enabled: "unknown", Process: "unknown", Err: errors.New("launchd status requires the platform job")}
+	}
+	statter, ok := platform.job.(interface {
+		Status(context.Context, string) (launchd.Status, error)
+	})
+	if !ok {
+		return managerObservation{Enabled: "unknown", Process: "unknown", Err: errors.New("launchd job has no status")}
+	}
+	st, err := statter.Status(ctx, cmdName)
+	if err != nil {
+		return managerObservation{Enabled: "unknown", Process: "unknown", Err: err}
+	}
+	process := "stopped"
+	if st.Running {
+		process = strconv.Itoa(st.PID)
+	}
+	enabled := "false"
+	if st.Enabled {
+		enabled = "true"
+	}
+	return managerObservation{Registered: st.Installed, Loaded: st.Loaded, Enabled: enabled, Process: process}
+}
 
 // buildServiceStatus keeps the historical status fields and adds registration,
 // enablement, manager process, readiness, and stale identity as separate
-// observations. Enablement and the manager process stay unknown until a
-// manager probe says otherwise; a state-file identity is not that probe.
-func buildServiceStatus(state cliServiceState, readErr error, registered bool) map[string]any {
+// observations.
+func buildServiceStatus(state cliServiceState, readErr error, mgr managerObservation) map[string]any {
 	alive := readErr == nil
 	status := "stopped"
 	readiness := "not-ready"
@@ -18,11 +67,18 @@ func buildServiceStatus(state cliServiceState, readErr error, registered bool) m
 		status = "running"
 		readiness = "identity-verified"
 	}
+	enabled, process := mgr.Enabled, mgr.Process
+	if enabled == "" {
+		enabled = "unknown"
+	}
+	if process == "" {
+		process = "unknown"
+	}
 	return map[string]any{
 		"status": status, "ready": alive, "pid": state.PID, "addr": state.Addr,
 		"started": state.Started, "version": state.ConfigVersion, "binary": state.BinaryPath,
-		"identity_error": errorString(readErr), "registration": registered,
-		"enabled": "unknown", "manager_process": "unknown", "readiness": readiness,
+		"identity_error": errorString(readErr), "registration": mgr.Registered,
+		"loaded": mgr.Loaded, "enabled": enabled, "manager_process": process, "readiness": readiness,
 		"stale": errors.Is(readErr, errStaleIdentity),
 	}
 }

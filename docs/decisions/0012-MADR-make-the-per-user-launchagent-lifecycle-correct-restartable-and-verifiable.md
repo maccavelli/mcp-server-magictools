@@ -82,6 +82,8 @@ The identifiers below are used by the decision and state table. All source locat
 Chosen option: "A. Repair and unify the standalone per-user LaunchAgent", because it fixes the demonstrated lifecycle and
 rollback defects without requiring a new app bundle, privileged system service, or XPC socket architecture.
 
+The 2026-11-25 adoption amendment below was accepted by the owner, who approved its execution.
+
 ### Decision
 
 1. **One controller and one identity.** Introduce one Darwin lifecycle controller used by install, start, stop, restart,
@@ -273,3 +275,91 @@ The findings are source-, documentation-, and fixture-grounded; no production li
 restart timing and login-item authorization behavior still require the isolated Darwin tests specified above. The MADR
 proposes the decision; it does not approve implementation. A separate implementation PLAN is required before source,
 tests, service definitions, or documentation are changed.
+
+### Adoption amendment, 2026-11-25, accepted
+
+Reviewed against `go-selfupdate-lib` v1.26.3 at commit `31218e1`. The owner directed three things: the library's plist
+policy is the one to keep, adoption of that library is to be finished, and more of its service API should be used where
+it improves the product. This amendment records that direction. It does not authorize execution.
+
+The library does not ship a product LaunchAgent renderer. Its plist policy, in `selfupdate/service/launchd`, is:
+
+* An in-place binary replacement already names the executable. `Job.Reconcile` checks `Program`, otherwise
+  `ProgramArguments.0`, and changes nothing when `service.SameExecutable` matches.
+* A different path is an error wrapping `service.ErrBinaryMismatch` unless `Options.RewritePath` is set. A rewrite uses
+  `plutil -replace`, then `plutil -lint`, and keeps the file mode and owner. A running job is refused before the file
+  changes. A loaded, not-running job is reloaded by bootout, the library's stop wait, and bootstrap, without `disable`
+  and without kickstart.
+* `Restore` puts the previous bytes, mode, and owner back, and reloads only a loaded, not-running job.
+* `Stop` is bootout plus a wait bounded by the longer of the poll timeout and the plist's `ExitTimeOut` plus 30 seconds.
+  Bootout, not `disable`, is what holds against `KeepAlive`. Exit codes 0, 3, 36, and 113 are gone. `print-disabled` is
+  read only inside the library's `Enabled`.
+* A negative `Poll.Settle` disables the stability window. The default is 10 seconds, and the launchd running-poll raises
+  a non-negative settle to at least that.
+* `Job` is one object. `Stop` records the previous PID that `WaitHealthy` must not accept. A second `Job` does not see it.
+* `Status` reports installed, loaded, enabled, running, and PID from one probe. `HandOffIfInside` detaches an update
+  that would die with the job. `systemd.Unit` and `scm.Service` implement the same Lifecycle, Reconciler, and Detacher
+  contracts. `service.ExecReconciler` expects one JSON receipt with `schema_version`, a verdict, and a reload bit.
+
+The tree at `31218e1` adopts the managed installer, the exact asset selector, the strict version policy, and a platform
+`Job` for update start, stop, and health. It does not follow the plist policy above.
+
+| ID | Observed wiring at `31218e1` | Required change |
+| --- | --- | --- |
+| A1 | Update reconcile shells out to `service refresh`, which rewrites the whole plist. | Update reconcile is the platform `Job`'s `Reconcile`. An unchanged path changes nothing. |
+| A2 | Refresh of a non-running job calls interactive `Stop`, which `disable`s before bootout. A stopped update is not started again, so the disable can persist. | Reload is the library reload: bootout, wait, bootstrap. No `disable`. No kickstart. |
+| A3 | Interactive restart stops a newly constructed job, then starts and waits on another. `previous` is lost. `launchctlRunner` is not `Options.Runner`. | One job per operation. The product runner is `Options.Runner`. `disable` runs only for an operator stop, on that same job's target, before `Stop`. |
+| A4 | `Poll.Settle` is `-1`. The first ready observation passes. | Do not set a negative settle. Keep the library's 10-second window. |
+| A5 | Status leaves `enabled` and `manager_process` unknown. Doctor asks only `Running`. | Darwin status and doctor display `Job.Status`. The product does not parse `launchctl print` or `print-disabled` itself. |
+| A6 | Linux `service start` and `service stop` call `systemctl` and do not wait for the probe. Windows start and stop use the local SCM code. Windows refresh reports that there is no on-disk definition. | Interactive start, stop, and restart on every platform go through the shared controller and its library job, including `WaitHealthy`. Windows reconcile is `scm.Service.Reconcile`. |
+| A7 | Refresh and the definition-target check use `os.UserHomeDir`. The job uses `resolveLaunchdTargetFn`. | One resolver. The job's plist path is the only definition path. |
+| A8 | An update started inside the service can die in `Stop` (`service.ErrInsideService`) and leave the job down. | Call `service.HandOffIfInside` before `Run`. Call `service.LoadHandOffEnv` at process start. Read the detached result. Do not hand off twice. |
+
+Install-time rendering stays in the product. The library has no renderer for this product's `KeepAlive`, `ExitTimeOut`
+of 35, `Umask`, `ProcessType`, `HOME`, or log path. An explicit `service refresh` may still rewrite that policy for
+migration. It must then reload through the library, not through interactive stop. An update must not call that rewrite.
+
+`EnabledLifecycle` stays off the update adapter. A stopped service is not started because the plist says `KeepAlive`.
+Signature verifiers, `ReplaceBeforeStop`, Task Scheduler, `SMAppService`, socket activation, and XPC transactions stay
+out. Checksum verification remains `NewExactAssetSelector`'s required `SHA256SUMS`. No signing keys are in this decision.
+
+#### Amendment options
+
+* E. Finish adoption of the v1.26.3 service contract: library reconcile and reload, one shared job, default settle, status from `Job.Status`, all platforms through that job, and handoff when the update is inside the service.
+* F. Keep the product renderer and refresh-on-update, and patch only the disable and split-job defects.
+* G. Replace the install-time renderer with a library renderer.
+
+#### Amendment outcome
+
+Chosen option: "E. Finish adoption of the v1.26.3 service contract", because the library already defines reconcile,
+reload, restore, settle, status, and handoff, and a second implementation of those is what produced A1 through A8.
+Option G is not available: the library does not render this product's plist. Option F keeps two policies for one file.
+
+* Good, because an update no longer rewrites a plist whose program path did not change, and a failed update restores bytes, mode, and owner through the library receipt.
+* Good, because refresh and update can no longer persist a disable that the operator did not ask for.
+* Good, because restart and update health share the job that saw the old PID, and a crash inside the settle window does not count as healthy.
+* Good, because an update started inside the service is detached instead of stopping itself.
+* Neutral, because health waits take at least the library's 10-second settle. That is slower than the current first-success probe.
+* Neutral, because existing installations do not pick up a new plist policy until an explicit refresh or reinstall.
+* Bad, because Linux and Windows interactive commands move onto the library job, which is a wider change than the Darwin defects alone.
+* Bad, because `Job.Status`'s enabled bit is the library's `print-disabled` reading. The product may display it. It must not parse that text itself, and it must not treat the bit as a private API.
+
+#### Amendment state table
+
+| State or input | Disposition | Required outcome and proof |
+| --- | --- | --- |
+| Update, plist already names the new binary | decided | `Reconcile` changes nothing and does not disable or kickstart. Fake job. |
+| Update, plist names another binary, `RewritePath` unset | decided | Error wraps `service.ErrBinaryMismatch`. The file is unchanged. Fake job. |
+| Update, plist names another binary, rewrite allowed | decided | `plutil` replace and lint, mode and owner kept, running job refused, loaded stopped job reloaded without disable. Fake runner. |
+| Reconcile or reload failure | decided | Library `Restore` puts the previous bytes, mode, and owner back. No interactive disable. Fake runner. |
+| Explicit `service refresh` | decided | Product renderer may rewrite policy keys. Reload is library bootout, wait, bootstrap. A non-running job is not disabled. Fake job. |
+| Operator `service stop` | decided | `disable`, then the same job's `Stop`. Restart and update do not disable. Fake runner. |
+| Operator `service restart` and update health | decided | Stop, start, and wait share one job. The previous PID does not satisfy `WaitHealthy`. A process that exits inside the settle window does not pass. Fake clock and runner. |
+| `launchctl` calls | decided | Disable and the job use one `Options.Runner`. Absent bootout follows the library's 0, 3, 36, and 113. Other exits are not absent. Fake runner. |
+| Darwin status and doctor | decided | Fields come from `Job.Status` plus the product health probe. No product parser of `print` or `print-disabled`. Fake job. |
+| Linux and Windows start, stop, restart | decided | Shared controller, library job, and `WaitHealthy`. No direct `systemctl` start or stop on those commands. Fake job. |
+| Windows update reconcile | decided | `scm.Service.Reconcile`. No success that means "no on-disk definition" while a service is installed. Fake SCM job. |
+| Update started inside the service | decided | `HandOffIfInside` detaches once. `LoadHandOffEnv` runs at start. The detached result is the command result. Fake detacher. |
+| Update started outside the service | decided | No handoff. The same process runs `Updater.Run`. Fake detacher. |
+| Signature verification, Task Scheduler, `ReplaceBeforeStop`, `EnabledLifecycle` on the update adapter | out of scope | Checksums stay. A stopped service stays stopped. The other facilities need their own decision. |
+| Install-time plist keys | decided | Product renderer remains the install and explicit-refresh writer. It is not invoked by update reconcile. Existing round-trip tests stay. |

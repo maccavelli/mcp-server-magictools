@@ -203,35 +203,6 @@ func uninstallWindowsService() error {
 	return removeWindowsService(m)
 }
 
-func startWindowsService() error {
-	m, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("connect to service manager: %w", err)
-	}
-	defer m.Disconnect()
-	s, err := m.OpenService(windowsServiceName)
-	if err != nil {
-		return fmt.Errorf("open service (is it installed?): %w", err)
-	}
-	defer s.Close()
-	return s.Start()
-}
-
-func stopWindowsService() error {
-	m, err := mgr.Connect()
-	if err != nil {
-		return fmt.Errorf("connect to service manager: %w", err)
-	}
-	defer m.Disconnect()
-	s, err := m.OpenService(windowsServiceName)
-	if err != nil {
-		return fmt.Errorf("open service (is it installed?): %w", err)
-	}
-	defer s.Close()
-	_, err = s.Control(svc.Stop)
-	return err
-}
-
 // windowsServiceInstalled reports whether the SCM service is registered.
 func windowsServiceInstalled() (bool, error) {
 	m, err := mgr.Connect()

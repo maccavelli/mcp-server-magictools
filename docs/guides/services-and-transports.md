@@ -51,17 +51,21 @@ mcp-server-magictools service uninstall
 Use `service status --json` for automation. Status verifies the recorded process
 start token and executable rather than treating any live PID as the service.
 The JSON object keeps `status`, `ready`, `pid`, `addr`, `started`, `version`,
-`binary`, and `identity_error`, and adds `registration`, `enabled`,
-`manager_process`, `readiness`, and `stale`. `enabled` and `manager_process`
-stay `unknown` unless a manager probe filled them. `service doctor` returns a
-nonzero status when it finds actionable issues.
+`binary`, and `identity_error`, and adds `registration`, `loaded`, `enabled`,
+`manager_process`, `readiness`, and `stale`. On macOS those manager fields come
+from the library job's status. This program does not parse `launchctl print`.
+`service doctor` returns a nonzero status when it finds actionable issues.
 
 On macOS the generated LaunchAgent uses unconditional `KeepAlive`, `RunAtLoad`,
 a five-second throttle, `ProcessType=Standard`, and a 35-second exit timeout.
 `service stop` disables and boots out the job but leaves its plist installed, so
 the stop persists across logins. `service start` enables it again and waits for
 identity-verified `/health` readiness; degraded HTTP 200 counts as ready.
-`service restart` boots out and starts the job without leaving it disabled.
+`service restart` boots out and starts the same job without leaving it disabled.
+Health waits at least 10 seconds so a process that exits inside that window
+does not count as ready. `update` does not rewrite a plist whose program path
+already matches the binary. `service refresh` is the explicit policy rewrite;
+its reload boots out and bootstraps, and it does not disable the job.
 Run these commands in the owning user's GUI session. A mismatched `SUDO_UID`
 is refused before any definition is written or any launchd domain is changed.
 Both launchd output streams use

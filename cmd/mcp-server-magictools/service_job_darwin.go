@@ -4,9 +4,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
-	"time"
 
 	"github.com/maccavelli/go-selfupdate-lib/selfupdate"
 	"github.com/maccavelli/go-selfupdate-lib/selfupdate/service"
@@ -14,6 +14,10 @@ import (
 )
 
 var launchctlRunner service.Runner = service.ExecRunner()
+
+func init() {
+	bootstrapLaunchdFn = bootstrapLaunchd
+}
 
 func runLaunchctl(ctx context.Context, args ...string) error {
 	out, err := launchctlRunner.Run(ctx, service.Command{Path: "/bin/launchctl", Args: args, Env: []string{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "LC_ALL=C"}})
@@ -40,18 +44,16 @@ func newPlatformJob() (selfupdate.Lifecycle, error) {
 	plist := home + "/Library/LaunchAgents/" + productionServiceLabel + ".plist"
 	return launchd.New(launchd.Options{
 		Label: productionServiceLabel, Domain: launchd.GUI(uidInt), Plist: plist,
-		Probe: probeServiceHealth,
-		Poll:  servicePollOptions(),
+		Runner: launchctlRunner,
+		Probe:  probeServiceHealth,
+		Poll:   servicePollOptions(),
 	})
 }
 
-func servicePollOptions() service.PollOptions {
-	return service.PollOptions{Interval: 250 * time.Millisecond, Timeout: healthTimeout, Settle: -1}
-}
-
-// stopLaunchdPersistent disables before bootout, making the operator's stop
-// stable under unconditional KeepAlive. Restart deliberately skips disable.
-func stopLaunchdPersistent(ctx context.Context, product string, restarting bool) error {
+// stopLaunchdPersistent disables before bootout on the job that will start
+// again. Restart, refresh, and update skip disable. The job is the caller's:
+// a second job would forget the PID WaitHealthy must reject.
+func stopLaunchdPersistent(ctx context.Context, product string, restarting bool, job selfupdate.Lifecycle) error {
 	_, _, target, err := launchdTarget()
 	if err != nil {
 		return err
@@ -61,9 +63,17 @@ func stopLaunchdPersistent(ctx context.Context, product string, restarting bool)
 			return err
 		}
 	}
-	job, err := newPlatformJobFn()
+	if job == nil {
+		return errors.New("launchd stop requires the operation's job")
+	}
+	return job.Stop(ctx, product)
+}
+
+func bootstrapLaunchd(ctx context.Context) error {
+	home, uid, _, err := launchdTarget()
 	if err != nil {
 		return err
 	}
-	return job.Stop(ctx, product)
+	plist := home + "/Library/LaunchAgents/" + productionServiceLabel + ".plist"
+	return runLaunchctl(ctx, "bootstrap", "gui/"+uid, plist)
 }

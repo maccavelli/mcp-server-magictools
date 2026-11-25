@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/maccavelli/go-selfupdate-lib/selfupdate"
+	"github.com/maccavelli/go-selfupdate-lib/selfupdate/service"
 )
 
 // serviceLifecycle is the one update-facing lifecycle used on every platform.
@@ -45,7 +46,7 @@ func (l *platformServiceLifecycle) Running(ctx context.Context, product string) 
 }
 func (l *platformServiceLifecycle) Stop(ctx context.Context, product string) error {
 	if runtime.GOOS == goOSDarwin {
-		return stopLaunchdPersistent(ctx, product, false)
+		return stopLaunchdPersistent(ctx, product, false, l.job)
 	}
 	return l.job.Stop(ctx, product)
 }
@@ -65,7 +66,7 @@ func (l *platformServiceLifecycle) Restart(ctx context.Context) error {
 		}
 		return l.WaitHealthy(ctx, cmdName)
 	}
-	if err := stopLaunchdPersistent(ctx, cmdName, true); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := stopLaunchdPersistent(ctx, cmdName, true, l.job); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	if err := l.Start(ctx, cmdName); err != nil {
@@ -151,5 +152,60 @@ func runSharedServiceActionLocked(ctx context.Context, action string) error {
 }
 
 func serviceActionContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		parent = context.Background()
+	}
 	return context.WithTimeout(parent, 90*time.Second)
+}
+
+// servicePollOptions leaves Settle unset so the library applies its 10-second
+// stability window. A negative settle would accept the first ready observation.
+func servicePollOptions() service.PollOptions {
+	return service.PollOptions{Interval: 250 * time.Millisecond, Timeout: healthTimeout}
+}
+
+// bootstrapLaunchdFn loads a rewritten plist. Darwin replaces it. It does not
+// enable, disable, or kickstart.
+var bootstrapLaunchdFn = func(context.Context) error {
+	return errors.New("launchd bootstrap requires darwin")
+}
+
+// reloadLaunchdDefinition boots out a loaded job and bootstraps the new plist.
+// It does not disable and it does not kickstart. An unloaded job is left for
+// the next start.
+func reloadLaunchdDefinition(ctx context.Context) error {
+	life, err := newServiceLifecycle("")
+	if err != nil {
+		return err
+	}
+	platform, ok := life.(*platformServiceLifecycle)
+	if !ok || platform.job == nil {
+		return errors.New("launchd reload requires the platform job")
+	}
+	loaded, err := launchdJobLoaded(ctx, platform.job)
+	if err != nil {
+		return err
+	}
+	running, err := platform.job.Running(ctx, cmdName)
+	if err != nil {
+		return err
+	}
+	if !loaded && !running {
+		return nil
+	}
+	if err := platform.job.Stop(ctx, cmdName); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return bootstrapLaunchdFn(ctx)
+}
+
+func launchdJobLoaded(ctx context.Context, job selfupdate.Lifecycle) (bool, error) {
+	type loadedJob interface {
+		Loaded(context.Context, string) (bool, error)
+	}
+	l, ok := job.(loadedJob)
+	if !ok {
+		return false, nil
+	}
+	return l.Loaded(ctx, cmdName)
 }

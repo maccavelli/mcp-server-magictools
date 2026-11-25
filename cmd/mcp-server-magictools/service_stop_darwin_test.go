@@ -23,6 +23,26 @@ func (j *argvJob) Stop(context.Context, string) error {
 	return j.err
 }
 
+func TestRestartUsesTheSameJob(t *testing.T) {
+	home := t.TempDir()
+	oldResolve := resolveLaunchdTargetFn
+	resolveLaunchdTargetFn = func() (string, string, error) { return home, "501", nil }
+	t.Cleanup(func() { resolveLaunchdTargetFn = oldResolve })
+	oldJob := newPlatformJobFn
+	newPlatformJobFn = func() (selfupdate.Lifecycle, error) {
+		t.Fatal("restart constructed a second job")
+		return nil, nil
+	}
+	t.Cleanup(func() { newPlatformJobFn = oldJob })
+	f := &recordingLifecycle{}
+	if err := (&platformServiceLifecycle{job: f}).Restart(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) == 0 || f.calls[0] != "stop" {
+		t.Fatalf("calls = %v", f.calls)
+	}
+}
+
 func TestStopLaunchdDisableBootoutTimeoutAndRestart(t *testing.T) {
 	home := t.TempDir()
 	oldResolve := resolveLaunchdTargetFn
@@ -44,7 +64,7 @@ func TestStopLaunchdDisableBootoutTimeoutAndRestart(t *testing.T) {
 		return service.Output{}, context.DeadlineExceeded
 	})
 
-	err := stopLaunchdPersistent(context.Background(), cmdName, false)
+	err := stopLaunchdPersistent(context.Background(), cmdName, false, job)
 	if !errors.Is(err, errLaunchctlTimeout) || errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("stop timeout = %v", err)
 	}
@@ -56,7 +76,7 @@ func TestStopLaunchdDisableBootoutTimeoutAndRestart(t *testing.T) {
 	}
 
 	argv = nil
-	err = stopLaunchdPersistent(context.Background(), cmdName, true)
+	err = stopLaunchdPersistent(context.Background(), cmdName, true, job)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +90,7 @@ func TestStopLaunchdDisableBootoutTimeoutAndRestart(t *testing.T) {
 		argv = append(argv, append([]string(nil), c.Args...))
 		return service.Output{ExitCode: 1, Stderr: []byte("Operation not permitted")}, nil
 	})
-	err = stopLaunchdPersistent(context.Background(), cmdName, false)
+	err = stopLaunchdPersistent(context.Background(), cmdName, false, job)
 	if errors.Is(err, os.ErrNotExist) || !errors.Is(err, errLaunchctlUnknown) {
 		t.Fatalf("permission = %v", err)
 	}

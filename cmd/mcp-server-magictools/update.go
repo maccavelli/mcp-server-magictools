@@ -2,16 +2,15 @@ package main
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/maccavelli/go-selfupdate-lib/selfupdate"
+	"github.com/maccavelli/go-selfupdate-lib/selfupdate/service"
 	"github.com/spf13/cobra"
 )
 
@@ -59,12 +58,11 @@ func defaultUpdater(errw io.Writer) (*selfupdate.Updater, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve executable: %w", err)
 	}
-	// Managed: the lifecycle adapter is bound to THIS executable, so a service
-	// definition pointing at another binary is treated as absent and is never
-	// stopped, reconciled or restarted.
-	managed, err := selfupdate.NewManagedInstaller(standalone,
-		&updateLifecycle{target: target},
-		&updateReconciler{})
+	// Managed: one adapter is both the lifecycle and the reconciler, so stop,
+	// reconcile, and start share the job that recorded the previous PID.
+	// A definition pointing at another binary is treated as absent.
+	life := &updateLifecycle{target: target}
+	managed, err := selfupdate.NewManagedInstaller(standalone, life, life)
 	if err != nil {
 		return nil, err
 	}
@@ -79,73 +77,55 @@ func defaultUpdater(errw io.Writer) (*selfupdate.Updater, error) {
 	})
 }
 
-// updateReconciler runs the NEW binary's hidden `service refresh --json` and
-// keeps its receipt so a rollback can restore the previous definition.
-type updateReconciler struct {
-	// runFn is the seam; production spawns the installed binary.
-	runFn func(ctx context.Context, executable string) ([]byte, error)
-}
+// handOffIfInside is the library handoff. Tests replace it.
+var handOffIfInside = service.HandOffIfInside
 
-var _ selfupdate.Reconciler = (*updateReconciler)(nil)
-
-// Reconcile rewrites the installed definition using the binary just installed.
-// Under MADR 0005 a reconcile failure is fatal and enters the shared rollback
-// path rather than being logged as a warning.
-func (r *updateReconciler) Reconcile(ctx context.Context, product, executable string) (selfupdate.ReconcileResult, error) {
-	if err := ctx.Err(); err != nil {
-		return selfupdate.ReconcileResult{}, err
+// handOffUpdate detaches an update that would die with the service. A second
+// call does not recurse: the library refuses when SELFUPDATE_HANDOFF is set.
+// No installed definition means there is nothing to detach from.
+func handOffUpdate(ctx context.Context, target string, args []string) (bool, error) {
+	installed, err := serviceDefinitionTargets(target)
+	if err != nil || !installed {
+		return false, err
 	}
-	run := r.runFn
-	if run == nil {
-		run = runServiceRefresh
-	}
-	out, err := run(ctx, executable)
+	job, err := newUpdateServiceJob(target)
 	if err != nil {
-		return selfupdate.ReconcileResult{}, fmt.Errorf("refresh %s service definition: %w", product, err)
+		return false, err
 	}
-	var receipt refreshReceipt
-	if err := json.Unmarshal(out, &receipt); err != nil {
-		return selfupdate.ReconcileResult{}, fmt.Errorf("parse refresh receipt: %w", err)
-	}
-	return selfupdate.ReconcileResult{
-		Changed: receipt.Changed,
-		Detail:  receipt.Detail,
-		State:   receipt,
-	}, nil
-}
-
-// Restore puts the previous definition back during rollback. A receipt this
-// adapter did not produce is an error rather than a silent success, so a
-// rollback never reports a restoration it did not perform.
-func (r *updateReconciler) Restore(ctx context.Context, product string, receipt selfupdate.ReconcileResult) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if !receipt.Changed {
-		return nil
-	}
-	state, ok := receipt.State.(refreshReceipt)
+	detacher, ok := job.(service.Detacher)
 	if !ok {
-		return fmt.Errorf("restore %s: unexpected reconcile receipt %T", product, receipt.State)
+		return false, nil
 	}
-	return restoreServiceDefinition(state)
+	detached, handed, err := handOffIfInside(ctx, detacher, service.HandOff{Executable: target, Args: args})
+	if err != nil || !handed {
+		return handed, err
+	}
+	return true, waitHandOffResult(ctx, detached.ResultPath)
 }
 
-// runServiceRefresh executes the installed binary's hidden refresh operation.
-// The child is the point: only the new binary carries the definition its own
-// release ships.
-func runServiceRefresh(ctx context.Context, executable string) ([]byte, error) {
-	// #nosec G204 — executable is the path this process just verified and installed.
-	cmd := exec.CommandContext(ctx, executable, "service", "refresh", "--json")
-	out, err := cmd.Output()
-	if err != nil {
-		detail := strings.TrimSpace(string(out))
-		if detail == "" {
-			detail = err.Error()
+func waitHandOffResult(ctx context.Context, path string) error {
+	ticker := time.NewTicker(healthPoll)
+	defer ticker.Stop()
+	for {
+		res, err := service.ReadHandOffResult(path)
+		if err == nil {
+			if res.Error != "" {
+				return errors.New(res.Error)
+			}
+			if res.ExitCode != 0 {
+				return fmt.Errorf("detached update exited %d", res.ExitCode)
+			}
+			return nil
 		}
-		return nil, fmt.Errorf("%s service refresh: %s", executable, detail)
+		if !os.IsNotExist(err) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
 	}
-	return out, nil
 }
 
 // buildKind maps the linker stamp. Only the exact string "release" counts.
@@ -181,6 +161,14 @@ This command starts no orchestrator, datastore or MCP server.`,
 			}
 			ctx, cancel := context.WithTimeout(cmd.Context(), updateOperationTimeout)
 			defer cancel()
+			target, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("resolve executable: %w", err)
+			}
+			handed, err := handOffUpdate(ctx, target, os.Args[1:])
+			if err != nil || handed {
+				return err
+			}
 			_, err = updater.Run(ctx, selfupdate.Request{
 				Product:        cmdName,
 				CurrentVersion: RawVersion,

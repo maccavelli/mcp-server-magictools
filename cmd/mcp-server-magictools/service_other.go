@@ -25,14 +25,6 @@ func uninstallWindowsService() error {
 	return fmt.Errorf("windows service is not supported on this platform")
 }
 
-func startWindowsService() error {
-	return fmt.Errorf("windows service is not supported on this platform")
-}
-
-func stopWindowsService() error {
-	return fmt.Errorf("windows service is not supported on this platform")
-}
-
 func windowsServiceInstalled() (bool, error) {
 	return false, fmt.Errorf("windows service is not supported on this platform")
 }

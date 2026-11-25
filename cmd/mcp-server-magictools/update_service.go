@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -50,6 +51,7 @@ type updateLifecycle struct {
 }
 
 var _ selfupdate.Lifecycle = (*updateLifecycle)(nil)
+var _ selfupdate.Reconciler = (*updateLifecycle)(nil)
 
 // Installed reports whether a definition exists AND targets this executable.
 func (l *updateLifecycle) Installed(ctx context.Context, _ string) (bool, error) {
@@ -58,6 +60,13 @@ func (l *updateLifecycle) Installed(ctx context.Context, _ string) (bool, error)
 	}
 	if l.installedFn != nil {
 		return l.installedFn(ctx, l.target)
+	}
+	if runtime.GOOS == goOSWindows {
+		life, err := l.serviceJob()
+		if err != nil {
+			return false, err
+		}
+		return life.Installed(ctx, cmdName)
 	}
 	return serviceDefinitionTargets(l.target)
 }
@@ -123,6 +132,43 @@ func (l *updateLifecycle) WaitHealthy(ctx context.Context, product string) error
 		return err
 	}
 	return life.WaitHealthy(ctx, product)
+}
+
+// Reconcile delegates to the platform job. A matching program path changes
+// nothing. This path does not spawn service refresh and does not disable.
+func (l *updateLifecycle) Reconcile(ctx context.Context, product, executable string) (selfupdate.ReconcileResult, error) {
+	if err := ctx.Err(); err != nil {
+		return selfupdate.ReconcileResult{}, err
+	}
+	rec, err := l.reconciler()
+	if err != nil {
+		return selfupdate.ReconcileResult{}, err
+	}
+	return rec.Reconcile(ctx, product, executable)
+}
+
+// Restore delegates to the same job. A foreign receipt is the job's error.
+func (l *updateLifecycle) Restore(ctx context.Context, product string, receipt selfupdate.ReconcileResult) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	rec, err := l.reconciler()
+	if err != nil {
+		return err
+	}
+	return rec.Restore(ctx, product, receipt)
+}
+
+func (l *updateLifecycle) reconciler() (selfupdate.Reconciler, error) {
+	job, err := l.serviceJob()
+	if err != nil {
+		return nil, err
+	}
+	rec, ok := job.(selfupdate.Reconciler)
+	if !ok {
+		return nil, errors.New("service job is not a reconciler")
+	}
+	return rec, nil
 }
 
 func (l *updateLifecycle) serviceJob() (selfupdate.Lifecycle, error) {

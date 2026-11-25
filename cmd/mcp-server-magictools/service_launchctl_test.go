@@ -30,6 +30,12 @@ func TestClassifyLaunchctlAbsentTimeoutAndPermission(t *testing.T) {
 	if errors.Is(printDenied, os.ErrNotExist) {
 		t.Fatal("print exit 113 classified as absent; print text is not the absence contract")
 	}
+	for _, exit := range []int{36, 113} {
+		gone := classifyLaunchctl([]string{"bootout", "gui/1/label"}, exit, "gone", nil)
+		if !errors.Is(gone, os.ErrNotExist) {
+			t.Fatalf("bootout exit %d = %v, want gone", exit, gone)
+		}
+	}
 
 	timedOut := classifyLaunchctl([]string{"bootout", "--wait", "gui/1/label"}, 0, "", context.DeadlineExceeded)
 	if !errors.Is(timedOut, errLaunchctlTimeout) || errors.Is(timedOut, os.ErrNotExist) {

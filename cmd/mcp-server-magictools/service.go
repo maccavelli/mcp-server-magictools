@@ -230,11 +230,11 @@ var serviceStatusCmd = &cobra.Command{
 // TEL-4: Machine-readable JSON status output
 func runServiceStatus(cmd *cobra.Command, args []string) error {
 	state, readErr := readExpectedServiceState(processIdentity{})
-	registered, regErr := definitionRegistered()
+	mgr := observeManager(cmd.Context())
 	alive := readErr == nil
 	if jsonStatusOutput {
-		fmt.Println(string(marshalIndentOrEmpty(buildServiceStatus(state, readErr, registered))))
-		return regErr
+		fmt.Println(string(marshalIndentOrEmpty(buildServiceStatus(state, readErr, mgr))))
+		return mgr.Err
 	}
 	if alive {
 		fmt.Println("✓ Service process identity is valid")
@@ -243,8 +243,9 @@ func runServiceStatus(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("  PID:     %d\n  Addr:    %s\n  Started: %s\n  Version: %s\n  Binary:  %s\n",
 		state.PID, state.Addr, state.Started, state.ConfigVersion, state.BinaryPath)
-	fmt.Printf("  Registered: %t\n", registered)
-	return regErr
+	fmt.Printf("  Registered: %t\n  Loaded: %t\n  Enabled: %s\n  Manager process: %s\n",
+		mgr.Registered, mgr.Loaded, mgr.Enabled, mgr.Process)
+	return mgr.Err
 }
 
 func errorString(err error) string {
@@ -763,21 +764,11 @@ var serviceStartCmd = &cobra.Command{
 	Short: "Start the magictools background service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		switch runtime.GOOS {
-		case goOSLinux:
-			out, err := timedExec("systemctl", systemctlUserFlag, "start", "mcp-server-magictools.service")
-			if err != nil {
-				return fmt.Errorf("systemctl start failed: %s: %w", string(out), err)
-			}
-		case goOSDarwin:
+		case goOSLinux, goOSDarwin, goOSWindows:
 			ctx, cancel := serviceActionContext(cmd.Context())
 			defer cancel()
 			if err := runSharedServiceAction(ctx, serviceActionStart); err != nil {
 				return err
-			}
-		case goOSWindows:
-			//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
-			if err := startWindowsService(); err != nil {
-				return fmt.Errorf("failed to start windows service: %w", err)
 			}
 		default:
 			return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
@@ -796,21 +787,11 @@ var serviceStopCmd = &cobra.Command{
 	Short: "Stop the magictools background service",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		switch runtime.GOOS {
-		case goOSLinux:
-			out, err := timedExec("systemctl", systemctlUserFlag, "stop", "mcp-server-magictools.service")
-			if err != nil {
-				return fmt.Errorf("systemctl stop failed: %s: %w", string(out), err)
-			}
-		case goOSDarwin:
+		case goOSLinux, goOSDarwin, goOSWindows:
 			ctx, cancel := serviceActionContext(cmd.Context())
 			defer cancel()
 			if err := runSharedServiceAction(ctx, serviceActionStop); err != nil {
 				return err
-			}
-		case goOSWindows:
-			//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
-			if err := stopWindowsService(); err != nil {
-				return fmt.Errorf("failed to stop windows service: %w", err)
 			}
 		default:
 			return fmt.Errorf("unsupported platform: %s", runtime.GOOS)
@@ -946,28 +927,15 @@ var serviceDoctorCmd = &cobra.Command{
 				fmt.Println("  ✓ DBUS_SESSION_BUS_ADDRESS is set")
 			}
 		case goOSDarwin:
-			home := homeDirOrDot()
-			plistPath := filepath.Join(home, "Library", "LaunchAgents", productionServiceLabel+".plist")
-			if _, err := os.Stat(plistPath); err != nil {
-				fmt.Printf("  ✗ LaunchAgent plist not found: %s\n", plistPath)
+			mgr := observeManager(cmd.Context())
+			if mgr.Err != nil {
 				issues++
+				fmt.Printf("  ✗ launchd state unknown: %v\n", mgr.Err)
+			} else if !mgr.Registered {
+				issues++
+				fmt.Println("  ✗ LaunchAgent is not registered")
 			} else {
-				fmt.Printf("  ✓ LaunchAgent plist exists: %s\n", plistPath)
-				ctx, cancel := serviceActionContext(cmd.Context())
-				life, err := newServiceLifecycle("")
-				if err != nil {
-					issues++
-					fmt.Printf("  ✗ Lifecycle construction failed: %v\n", err)
-				} else {
-					running, runErr := life.Running(ctx, cmdName)
-					cancel()
-					if runErr != nil {
-						issues++
-						fmt.Printf("  ✗ launchd state unknown: %v\n", runErr)
-					} else {
-						fmt.Printf("  launchd running: %t\n", running)
-					}
-				}
+				fmt.Printf("  ✓ LaunchAgent registered; loaded=%t enabled=%s process=%s\n", mgr.Loaded, mgr.Enabled, mgr.Process)
 			}
 		case goOSWindows:
 			//nolint:staticcheck // SA4023: always true on !windows, where the stub always errors; the windows build returns nil
@@ -1034,19 +1002,10 @@ var serviceRestartCmd = &cobra.Command{
 		"plist/SCM registration — use it to bounce the process after a config or " +
 		"binary change without re-running install.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if runtime.GOOS == goOSDarwin {
-			ctx, cancel := serviceActionContext(cmd.Context())
-			defer cancel()
-			if err := runSharedServiceAction(ctx, "restart"); err != nil {
-				return err
-			}
-		} else {
-			if err := serviceStopCmd.RunE(cmd, args); err != nil {
-				fmt.Printf("⚠ stop reported: %v (continuing to start)\n", err)
-			}
-			if err := serviceStartCmd.RunE(cmd, args); err != nil {
-				return fmt.Errorf("restart failed during start: %w", err)
-			}
+		ctx, cancel := serviceActionContext(cmd.Context())
+		defer cancel()
+		if err := runSharedServiceAction(ctx, "restart"); err != nil {
+			return err
 		}
 		auditServiceEvent("restart", "", nil)
 		return nil
