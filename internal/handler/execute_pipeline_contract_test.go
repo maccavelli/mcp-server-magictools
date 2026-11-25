@@ -172,6 +172,35 @@ func TestExecutePipelineContract_FreshGeneratesID(t *testing.T) {
 	}
 }
 
+func TestExecutePipelineContract_RejectStoredSessionNeverExecutes(t *testing.T) {
+	e := newPipelineContractEnv(t)
+	ctx := context.Background()
+	ps := e.h.pipelineSessions
+	rec := &pipelineSessionRecord{
+		SessionID: "ep-reject-zero", Target: "/tmp/x", Intent: "analyze",
+		Status: "PLANNED",
+		Stages: []db.PipelineStage{{ToolName: "brainstorm:analyzer", Role: "ANALYZER", Phase: 1}},
+	}
+	if err := createPlannedForTest(ctx, ps, rec); err != nil {
+		t.Fatal(err)
+	}
+	res := e.call(t, map[string]any{"session_id": "ep-reject-zero", "reject": true})
+	if e.calls.Load() != 0 {
+		t.Fatalf("rejection of a stored session executed %d stages, want 0", e.calls.Load())
+	}
+	if !strings.Contains(resultText(res), "REJECTED") {
+		t.Fatalf("want REJECTED result; got:\n%s", resultText(res))
+	}
+	// A repeated rejection returns the same REJECTED result, still zero calls.
+	res = e.call(t, map[string]any{"session_id": "ep-reject-zero", "reject": true})
+	if e.calls.Load() != 0 {
+		t.Fatalf("repeated rejection executed %d stages", e.calls.Load())
+	}
+	if !strings.Contains(resultText(res), "REJECTED") {
+		t.Fatalf("repeated reject: want REJECTED; got:\n%s", resultText(res))
+	}
+}
+
 func TestExecutePipelineContract_UnknownSession(t *testing.T) {
 	e := newPipelineContractEnv(t)
 	res := e.call(t, map[string]any{"session_id": "ep-does-not-exist"})
