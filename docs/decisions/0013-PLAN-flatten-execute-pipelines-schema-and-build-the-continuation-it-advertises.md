@@ -316,4 +316,89 @@ and TTL-bound; an old binary ignores them. No migration either way.
 
 ## Execution record
 
-No phase has run yet.
+### P0 — 2026-11-25, records placed (pass 1)
+
+- MADR `accepted`, PLAN `in-progress`, index rows updated; owner approval recorded in Prerequisites 0.
+- `markdownlint-cli2` on both records: 0 issues. `python3 scripts/check_records.py --check`: exit 0.
+- Commit `8f9860b` pushed to `main` (`184370e..8f9860b`). The commit also carries 0014's REPORT and
+  0015's proposed MADR, whose index rows the same `docs/README.md` edit references; 0015 remains
+  `proposed` pending its own approval.
+
+### P1 — 2026-11-25, re-grounded at `8f9860b` (pass 1)
+
+- HEAD `8f9860b9c6d4eb7bd04533702b4dcbc34e373308`, branch `main`, go1.27.4 darwin/arm64.
+- Root `anyOf` still at `internal/handler/inventory.go:323`; the only union keyword in non-test
+  handler source.
+- Handler gate unchanged at `internal/handler/execute_pipeline.go:49-57`; no `Reject` field.
+- No `pipeline-session` prefix in `internal/db`.
+- Both validators in `go.mod`: `santhosh-tekuri/jsonschema/v5 v5.3.1` (direct, `:109`),
+  `google/jsonschema-go v0.4.3` (indirect, `:100`).
+- Every grounding-table row confirmed; no deviation.
+- Additional seams verified for P2: `pipelineGate` (`pipeline_tools.go:24`),
+  `NewProxyService`/`ExecuteProxy` (`proxy_service.go:30,362`), `executeDAGStep`/`executeMutatorAST`
+  (`execute_pipeline.go:155,441`), `mcp.NewInMemoryTransports` (go-sdk v1.6.1 `mcp/transport.go:147`)
+  for the emitted-tools/list helper.
+
+### P2–P6 — 2026-11-25, code phases (pass 1 each)
+
+- **P2** tests written first, seen red (undefined store/gate/seams), committed with the phases that
+  turned them green. Files: `internal/db/pipeline_session_test.go`,
+  `internal/handler/execute_pipeline_contract_test.go`,
+  `internal/handler/pipeline_session_store_test.go`,
+  `internal/handler/pipeline_schema_validator_test.go`.
+- **P3** session store: `internal/db/pipeline_session.go` — own `pipeline-session:` prefix, compressed
+  values, 24h TTL + 1h grace, atomic `UpdateWithRetryCtx` transitions, 50-cap oldest-first eviction,
+  instance nonce, distinct refusal sentinels. Commits `532503b`, `c3de37f` (gofmt), `0208874`
+  (`OverwriteForTest` seam, missed from the P4 commit). Race gate: `internal/db` green on <linux-host>
+  (`-race -timeout 10m`), claim race 32×200 one winner every round.
+- **P4** argument gate: `execute_pipeline_gate.go` (strict `DisallowUnknownFields` decode, pure
+  `classifyPipelineArgs`, refusal vocabulary), `util/pipeline_id.go` (128-bit `ep-` ids).
+  `handleExecutePipeline` rewritten to gate-first dispatch. Commits `623407b`, `fbd5791` (gofmt).
+- **P5** continuation: `execute_pipeline_session.go` — dry-run store + fixed disclosure, claim →
+  plan-hash check → pre-flight → existing run loop → COMPLETED/FAILED with artifact URIs; reject with
+  no executor in reach. Test seams on the handler (`pipelineTestCountStep`,
+  `pipelineTestInjectStage`); `freshCheckCancelled`/`freshHaltOnFailure` now carry `sessionID` so a
+  failed/cancelled fresh run returns its issued id. Deviation from the plan's test list: added
+  `TestExecutePipelineContract_RejectStoredSessionNeverExecutes` (commit `1e0d7d4`) after plant 3
+  showed the gate-only reject rows did not exercise the stored-session reject path — the plan's P2
+  item 3 required it; the first draft missed it.
+- **P6** flat schema: `inventory.go` `execute_pipeline` entry — seven optional properties,
+  `additionalProperties: false`, `minProperties: 1`, no union; mode-carrying descriptions; guide's
+  two-stage paragraph corrected. The prompt (`prompts.go:39-40`) already said the decided contract;
+  unchanged. Commit `0d5a0c2`.
+
+### P7 — 2026-11-25, plants and gates (pass 1)
+
+**Plants (scratch copies of `git archive HEAD`, each seen to fail its named test):**
+
+| Plant | Test that failed | First failure line |
+| :--- | :--- | :--- |
+| root `anyOf` restored | `TestExecutePipelineSchema_FlatNoUnion` | `tool execute_pipeline: root holds anyOf` |
+| reject+fresh runs the fresh path | `TestExecutePipelineContract_Gate` + `RejectNeverExecutes` | 3 gate rows + zero-call row failed |
+| reject calls the executor | `TestExecutePipelineContract_RejectStoredSessionNeverExecutes` | `rejection of a stored session executed 1 stages, want 0` |
+| claim split read-then-write | `TestPipelineSessionStore_ClaimRace` | `round 0: 3 winners of 32 claims, want exactly 1` |
+| pre-flight removed | `TestExecutePipelineContinuation_Refusals/plan_stale` | `want plan_stale; got FAILED` |
+| disclosure word altered | `TestExecutePipelineDryRun_Disclosure` | `disclosure missing fixed words` |
+| id reduced to 64 bits | `TestExecutePipelineContract_FreshGeneratesID` | `must return a server-issued 128-bit ep- id` |
+| `DisallowUnknownFields` removed | `TestExecutePipelineContract_Gate/unknown_key` + `BadArguments` | gate row failed |
+| instance nonce not compared | `TestPipelineSessionStore_InterruptedRun` | `want ErrSessionInterrupted, got <nil>` |
+| cap removed | `TestPipelineSessionStore_CapEvictsOldest` | `oldest should be evicted, got <nil>` |
+
+**Gates:**
+
+- Full suite `go test ./... -count=1` on <linux-host> (linux/amd64) via `run-on-host`: exit 0, all packages ok.
+- Race gate `go test ./internal/handler/ ./internal/db/ -race -timeout 20m -count=1` on <linux-host>: exit 0
+  (handler 17.7s, db 43.6s).
+- `go vet ./...`: clean. `gofmt -l internal/ cmd/`: clean. `check_records.py --check`: exit 0.
+  `markdownlint-cli2` on the records: 0 issues.
+- `make lint` on <linux-host>: all findings in this plan's files fixed (errcheck on terminal transitions,
+  goconst `continue`, nilerr, revive get/Get naming, unparam) — commit `bb7a0c2`. **One pre-existing
+  finding remains, outside this plan's scope**: `cmd/mcp-server-magictools/service_lifecycle.go:69`
+  SA4023 (staticcheck), present at base `184370e`, owned by record 0012's lifecycle work. Recorded
+  here as a deviation from "every gate green"; not fixed by this plan.
+- Windows-host lint attempt failed on a host toolchain path issue (`C:Usersmacsmgo/bin/golangci-lint`
+  not found on <windows-host>); re-run pinned to linux. Host gap, not a code finding.
+
+**Independent review:** pending (P7 step 3).
+
+No later phase has run yet.
