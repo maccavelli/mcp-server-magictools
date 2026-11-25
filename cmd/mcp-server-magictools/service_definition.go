@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"syscall"
 
 	"github.com/maccavelli/mcp-server-magictools/internal/config"
@@ -196,4 +197,44 @@ func syncServiceDirectory(root *os.Root) error {
 		err = nil
 	}
 	return errors.Join(err, closeErr)
+}
+
+// plistXML is the product plist decoder. It lives in a non-test file because
+// launchdDefinitionProgram reads Program from an installed definition, and
+// go build does not compile *_test.go.
+type plistXML struct {
+	Dict struct {
+		Keys   []string `xml:"key"`
+		Values []struct {
+			XMLName xml.Name
+			Text    string   `xml:",chardata"`
+			Items   []string `xml:"string"`
+		} `xml:",any"`
+	} `xml:"dict"`
+}
+
+// plistXMLValue is one top-level dict value. Type is the element name, so a
+// boolean is "true" or "false" rather than text.
+type plistXMLValue struct {
+	Type, Text string
+	Items      []string
+}
+
+// decodePlistDict pairs each key with the value in the same position. A dict
+// whose counts differ is an error: indexing the shorter side would return
+// another key's program text.
+func decodePlistDict(data []byte) (map[string]plistXMLValue, error) {
+	var p plistXML
+	if err := xml.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("parse launchd definition: %w", err)
+	}
+	if len(p.Dict.Keys) != len(p.Dict.Values) {
+		return nil, fmt.Errorf("parse launchd definition: %d keys and %d values", len(p.Dict.Keys), len(p.Dict.Values))
+	}
+	out := make(map[string]plistXMLValue, len(p.Dict.Keys))
+	for i, key := range p.Dict.Keys {
+		v := p.Dict.Values[i]
+		out[key] = plistXMLValue{Type: v.XMLName.Local, Text: strings.TrimSpace(v.Text), Items: v.Items}
+	}
+	return out, nil
 }

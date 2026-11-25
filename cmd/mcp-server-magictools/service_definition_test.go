@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/xml"
 	"errors"
 	"os"
 	"path/filepath"
@@ -10,36 +9,25 @@ import (
 	"testing"
 )
 
-type plistXML struct {
-	Dict struct {
-		Keys   []string `xml:"key"`
-		Values []struct {
-			XMLName xml.Name
-			Text    string   `xml:",chardata"`
-			Items   []string `xml:"string"`
-		} `xml:",any"`
-	} `xml:"dict"`
-}
-
 func plistValues(t *testing.T, text string) map[string]plistXMLValue {
 	t.Helper()
-	var p plistXML
-	if err := xml.Unmarshal([]byte(text), &p); err != nil {
-		t.Fatalf("parse plist: %v", err)
-	}
-	if len(p.Dict.Keys) != len(p.Dict.Values) {
-		t.Fatalf("plist has %d keys and %d values", len(p.Dict.Keys), len(p.Dict.Values))
-	}
-	out := map[string]plistXMLValue{}
-	for i, key := range p.Dict.Keys {
-		out[key] = plistXMLValue{Type: p.Dict.Values[i].XMLName.Local, Text: strings.TrimSpace(p.Dict.Values[i].Text), Items: p.Dict.Values[i].Items}
+	out, err := decodePlistDict([]byte(text))
+	if err != nil {
+		t.Fatal(err)
 	}
 	return out
 }
 
-type plistXMLValue struct {
-	Type, Text string
-	Items      []string
+func TestLaunchdDefinitionProgramRejectsMismatchedDict(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "job.plist")
+	body := `<?xml version="1.0"?><plist><dict><key>Program</key><key>Label</key><string>only-one</string></dict></plist>`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := launchdDefinitionProgram(path)
+	if err == nil || os.IsNotExist(err) {
+		t.Fatalf("err = %v, want a parse error", err)
+	}
 }
 
 func testAbs(parts ...string) string {

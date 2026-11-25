@@ -345,6 +345,18 @@ the command path, a product `print-disabled` parser, a recursive handoff.
 Exit criterion: interactive control and update control share the library job on every supported platform; handoff is
 used only when the process is inside the service.
 
+### P13 — Make the command build without test files
+
+CI run `45669857778` failed Darwin and Windows at `go build ./...` because `launchdDefinitionProgram` uses `plistXML` and `plistXMLValue`, which exist only in `service_definition_test.go`. Linux vet and test passed for that reason. Do not call the library's unexported plist reader. Do not add a second decoder.
+
+1. Move `plistXML` and `plistXMLValue` from `cmd/mcp-server-magictools/service_definition_test.go` into `cmd/mcp-server-magictools/service_definition.go`. The file is compiled on every `GOOS`, because `update_service.go` references the decoder unconditionally.
+2. Add `decodePlistDict`. It unmarshals with the moved types, returns an error when `len(keys) != len(values)`, and returns the same map `plistValues` builds today, including the element name, trimmed text, and string items.
+3. Change `launchdDefinitionProgram` to call `decodePlistDict`. Keep the current read order: `Program` text, otherwise the first `ProgramArguments` item, otherwise an error. A missing file stays `os.IsNotExist`. A symlink resolution failure still returns the unresolved path.
+4. Change `plistValues` to call `decodePlistDict`. Delete the copied unmarshal loop.
+5. Add `TestLaunchdDefinitionProgramRejectsMismatchedDict`: two keys and one value is an error, and the error is not `os.IsNotExist`.
+
+Exit criterion: `go build -o /dev/null ./...` passes on this Darwin host, and the binary is not executed. The existing round-trip test still passes.
+
 ### P11 — Conformance, docs, and gates
 
 1. Run `servicetest.VerifyLifecycle` against the product wrapper over a fake lab, including absent, stopped, running,
@@ -493,6 +505,7 @@ Amendment, 2026-11-25: the owner accepted the amendment and approved P7 through 
 | P10 | Linux and Windows start, stop, and restart use the shared controller. Darwin status and doctor read `Job.Status` through a seam. `LoadHandOffEnv` runs at process start. `HandOffIfInside` runs before `Updater.Run` when a definition exists. |
 | P11 | `servicetest.VerifyLifecycle` passed over `updateLifecycle` delegating to `servicetest.FakeService`, with 200 ms bounds. Package tests for `./cmd/mcp-server-magictools` and `./internal/testsafety` passed on this Darwin host. |
 | P12 | Completion gates, 2026-11-25. Queued `go test -count=1 ./...` passed on this Darwin host (32s) and, with `-race`, passed on this Darwin host (31s). The same command passed on the fleet Linux distro (33s) and, after the Windows refresh fix, on the fleet Windows host (74s). `go vet ./...` and `make lint` passed on this Darwin host, 0 issues. Windows refresh uses the SCM reconciler only when no on-disk definition path is reported, so a stubbed path still uses the file refresh. The installed service was not migrated. |
+| P13 | `plistXML` and `plistXMLValue` moved to `service_definition.go`. `decodePlistDict` rejects a mismatched key and value count. `launchdDefinitionProgram` and `plistValues` call it. `go build -o /dev/null ./...` passed on this Darwin host; the binary was not executed. `TestLaunchdDefinitionProgramRejectsMismatchedDict` and the existing `TestLaunchdDefinition` tests passed. |
 
 Continuation, same working tree: mismatched `SUDO_UID` is refused before path use. Lifecycle install, uninstall, refresh,
 and shared start/stop/restart take a per-label lock; a cancelled waiter does not release the holder. `launchctl` results

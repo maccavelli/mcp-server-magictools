@@ -363,3 +363,25 @@ Option G is not available: the library does not render this product's plist. Opt
 | Update started outside the service | decided | No handoff. The same process runs `Updater.Run`. Fake detacher. |
 | Signature verification, Task Scheduler, `ReplaceBeforeStop`, `EnabledLifecycle` on the update adapter | out of scope | Checksums stay. A stopped service stays stopped. The other facilities need their own decision. |
 | Install-time plist keys | decided | Product renderer remains the install and explicit-refresh writer. It is not invoked by update reconcile. Existing round-trip tests stay. |
+| Command build, plist decoder | decided | `plistXML` and `plistXMLValue` live in a non-test file. `decodePlistDict` is the only pairing. A dict whose key count differs from its value count is an error. `go build ./...` is the proof. |
+
+### Build amendment, 2026-11-25
+
+CI run `45669857778` on `11c4a69` failed the Darwin and Windows `go build ./...` steps. Both reported `plistXML` and `plistXMLValue` undefined in `update_service.go`. Those types are declared only in `service_definition_test.go`. `go test` and `go vet` compile the test files with the package, so the Linux job, which does not run `go build ./...` except on a tag, passed. A tag build would fail at `make build-all` for the same reason. The lint failures on the two earlier runs were already fixed on `11c4a69`; the Linux job of `45669857778` passed lint.
+
+The library's plist reader is unexported. Calling it is not available. A second decoder would drift from the one the round-trip test already uses.
+
+#### Build amendment options
+
+* H. Move the existing decoder into a non-test file, share it with the test helper, and reject a dict whose key count differs from its value count.
+* I. Duplicate a minimal reader beside `launchdDefinitionProgram` and leave the test types where they are.
+* J. Build-tag the reader as Darwin-only and stub it elsewhere.
+
+#### Build amendment outcome
+
+Chosen option: "H. Move the existing decoder into a non-test file", because the command already depends on that decoder and the test already requires equal key and value counts. Option I is two parsers. Option J does not fix the Darwin build, which is the platform that reads the plist.
+
+* Good, because `go build ./...` no longer depends on a test file.
+* Good, because a mis-paired dict cannot return another key's program text.
+* Neutral, because the unmarshal shape is unchanged. This does not add a new plist policy.
+* Bad, because the types remain a product parser rather than a library call. The library reader is unexported, so that call is not available.

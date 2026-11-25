@@ -2,9 +2,7 @@ package main
 
 import (
 	"context"
-	"encoding/xml"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -233,15 +231,9 @@ func launchdDefinitionProgram(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var p plistXML
-	if err := xml.Unmarshal(data, &p); err != nil {
-		return "", fmt.Errorf("parse launchd definition: %w", err)
-	}
-	values := map[string]plistXMLValue{}
-	for i, key := range p.Dict.Keys {
-		if i < len(p.Dict.Values) {
-			values[key] = plistXMLValue{Text: strings.TrimSpace(p.Dict.Values[i].Text), Items: p.Dict.Values[i].Items}
-		}
+	values, err := decodePlistDict(data)
+	if err != nil {
+		return "", err
 	}
 	program := values["Program"].Text
 	if program == "" && len(values["ProgramArguments"].Items) > 0 {
