@@ -9,7 +9,7 @@ This tree holds three kinds of document:
 - **[architecture.md](architecture.md)** — how the pieces fit together, as they are now.
 - **guides/** — task-shaped walkthroughs for install, setup, clients, transports, configuration, the CLI, MCP tools, the dashboard, operations, safe testing, and the repository audit.
 - **[decisions/](decisions/)** — numbered MADR/PLAN pairs.
-- **reports/** — what was observed, deciding nothing. None exists yet; the first report creates this directory.
+- **reports/** — what was observed, deciding nothing.
 
 ## Records
 
@@ -39,6 +39,10 @@ This tree holds three kinds of document:
 | 0011 | PLAN | [0011-PLAN-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md](decisions/0011-PLAN-make-two-telemetry-tests-own-their-state-under-repeated-rounds.md) | implemented |
 | 0012 | MADR | [0012-MADR-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md](decisions/0012-MADR-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md) | accepted |
 | 0012 | PLAN | [0012-PLAN-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md](decisions/0012-PLAN-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md) | implemented |
+| 0013 | MADR | [0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](decisions/0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md) | accepted |
+| 0013 | PLAN | [0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](decisions/0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md) | in-progress |
+| 0014 | REPORT | [0014-REPORT-mcp-tool-schema-and-description-adherence.md](reports/0014-REPORT-mcp-tool-schema-and-description-adherence.md) | complete |
+| 0015 | MADR | [0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md](decisions/0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md) | proposed |
 
 ## I want to…
 
