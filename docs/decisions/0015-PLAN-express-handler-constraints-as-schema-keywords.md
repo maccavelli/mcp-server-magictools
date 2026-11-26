@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 date: 2026-11-26
 associated-madr: "0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md"
 ---
@@ -152,4 +152,66 @@ pre-call range information and the discoverability of four config keys. No store
 
 ## Execution record
 
-No phase has run yet.
+### Approval — 2026-11-26
+
+Owner: "accept and approved to proceed, commit and push to main for the session". PLAN `in-progress`;
+commit and push to `main` authorized for this session's phases.
+
+### P0 — 2026-11-26, re-grounded at `09c5ded` (pass 1)
+
+- `lines` clamp confirmed (`diagnostic_handlers.go:178-185`); `max_tools` default 1000 (`:436-439`).
+- `config.go:929-1052`: 18 `case` lines = 14 top-level keys + 4 boolean-spelling sub-cases; the
+  14-key set holds.
+- mcplib constants 25/1000 confirmed (`diagnostic.go:19-20`).
+- No deviation.
+
+### P1 — 2026-11-26, tests first (pass 1)
+
+- `internal/handler/inventory_constraints_test.go`: `TestInventoryConstraints` with five subtests
+  (`analyze_system_logs.lines`, `list_tools.options.max_tools`, `get_internal_logs.max_lines`,
+  `update_config.key_enum`, `update_config.value_per-key_rules`) pinning the honesty table, the
+  14-key enum set, the `options` description, and the per-key value rules.
+- Seen red against the unchanged inventory (keywords absent, enum at 10 keys, `options`
+  undescribed), then green after P2.
+
+### P2 — 2026-11-26, inventory edits (pass 1, commit `85579a7`)
+
+- `internal/handler/inventory.go`: keywords applied per the honesty table — `lines`
+  `minimum: 1, maximum: 1000, default: 50`; `max_lines` `minimum: 0, maximum: 1000, default: 25`
+  with the clamp nuance in the description; `max_tools` `minimum: 1, default: 1000`, no `maximum`;
+  `options` described.
+- `update_config.key` enum completed to the 14-key set (`vector_enabled`, `ringBufferTargets`,
+  `tokenSpendThresh`, `lruLimit` added); per-key value rules written into the `value` description.
+- `TestInventoryConstraints` green; no handler behaviour changed (2 files, +146 −5).
+
+### P3 — 2026-11-26, plants and gates (pass 1)
+
+**Plants (scratch copies, each seen to fail `TestInventoryConstraints`, cleaned up):**
+
+| Plant | Result |
+| :--- | :--- |
+| `lines.maximum` changed to 500 | failed as planned |
+| enum reduced to the old 10 | failed as planned |
+| `max_lines.default` changed to 0 | failed as planned |
+| `options` description removed | failed as planned |
+| `max_tools.maximum` added | failed as planned |
+
+**Gates:**
+
+- Full suite `-tags magictoolstestseam ./...` on `<windows-host>` via `run-on-host`: exit 0.
+- `make lint` on `<linux-host>` (WSL Ubuntu-24.04) via `run-on-host --need linux`: exit 2, one
+  finding — `service_lifecycle.go:69` SA4023, the pre-existing linux-only issue that belongs to
+  record 0012, out of this plan's scope. No finding in this plan's files. (The session note that
+  this distro lacks golangci-lint is stale: the run found and used
+  `$HOME/go/bin/golangci-lint`.)
+- `make lint` locally via `run-heavy`: 0 issues (the SA4023 does not reproduce on darwin),
+  matching D1's recorded gate evidence.
+- `TestInventoryConstraints` re-run at HEAD: PASS (5/5 subtests). `go vet ./...`: clean.
+  `gofmt -l` on both changed files: clean. `check_records.py --check`: exit 0.
+  `markdownlint-cli2`: 0 issues.
+
+**Completion criteria:** all four met — keywords equal the measured handler values, the enum is
+exactly the 14-key set, `options` described and per-key rules documented, every plant failed and
+gates green with no handler behaviour change.
+
+PLAN remains `in-progress` pending owner acceptance of the execution.
