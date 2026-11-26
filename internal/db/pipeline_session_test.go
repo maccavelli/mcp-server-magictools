@@ -133,13 +133,13 @@ func TestPipelineSessionStore_ContinueRejectRace(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			if _, err := ps.ClaimRunning(ctx, id, "nonce-cont"); err == nil {
+			if _, err := ps.ClaimRunning(ctx, id, "test-instance"); err == nil {
 				claimed.Add(1)
 			}
 		}()
 		go func() {
 			defer wg.Done()
-			if _, err := ps.Reject(ctx, id); err == nil {
+			if _, err := ps.Reject(ctx, id, "test-instance"); err == nil {
 				rejected.Add(1)
 			}
 		}()
@@ -157,7 +157,7 @@ func TestPipelineSessionStore_Reject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rec, err := ps.Reject(ctx, "ep-rej-1")
+	rec, err := ps.Reject(ctx, "ep-rej-1", "test-instance")
 	if err != nil {
 		t.Fatalf("Reject: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestPipelineSessionStore_Reject(t *testing.T) {
 	}
 
 	// A repeated reject returns the same REJECTED record, not an error.
-	again, err := ps.Reject(ctx, "ep-rej-1")
+	again, err := ps.Reject(ctx, "ep-rej-1", "test-instance")
 	if err != nil {
 		t.Fatalf("repeated Reject: %v", err)
 	}
@@ -180,6 +180,36 @@ func TestPipelineSessionStore_Reject(t *testing.T) {
 	// A claim after rejection is refused.
 	if _, err := ps.ClaimRunning(ctx, "ep-rej-1", "nonce-x"); !errors.Is(err, ErrSessionRejected) {
 		t.Fatalf("claim after reject: want ErrSessionRejected, got %v", err)
+	}
+}
+
+func TestPipelineSessionStore_RejectInterruptedRun(t *testing.T) {
+	_, ps, _ := newSessionStore(t)
+	ctx := context.Background()
+	if err := ps.CreatePlanned(ctx, plannedSession("ep-int-rej")); err != nil {
+		t.Fatal(err)
+	}
+	// Claimed by a previous server instance.
+	if _, err := ps.ClaimRunning(ctx, "ep-int-rej", "old-instance"); err != nil {
+		t.Fatal(err)
+	}
+	// The current instance may discard the interrupted run (owner ruling).
+	rec, err := ps.Reject(ctx, "ep-int-rej", "new-instance")
+	if err != nil {
+		t.Fatalf("reject of interrupted run: %v", err)
+	}
+	if rec.Status != SessionRejected || len(rec.Stages) != 0 {
+		t.Fatalf("want REJECTED with no stages, got %+v", rec)
+	}
+	// A same-instance RUNNING session still refuses reject.
+	if err := ps.CreatePlanned(ctx, plannedSession("ep-live-rej")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.ClaimRunning(ctx, "ep-live-rej", "this-instance"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ps.Reject(ctx, "ep-live-rej", "this-instance"); !errors.Is(err, ErrSessionRunning) {
+		t.Fatalf("same-instance reject: want ErrSessionRunning, got %v", err)
 	}
 }
 
@@ -203,7 +233,7 @@ func TestPipelineSessionStore_Expiry(t *testing.T) {
 	if _, err := ps.ClaimRunning(ctx, "ep-exp-1", "nonce-x"); !errors.Is(err, ErrSessionExpired) {
 		t.Fatalf("claim past expiry: want ErrSessionExpired, got %v", err)
 	}
-	if _, err := ps.Reject(ctx, "ep-exp-1"); !errors.Is(err, ErrSessionExpired) {
+	if _, err := ps.Reject(ctx, "ep-exp-1", "test-instance"); !errors.Is(err, ErrSessionExpired) {
 		t.Fatalf("reject past expiry: want ErrSessionExpired, got %v", err)
 	}
 }

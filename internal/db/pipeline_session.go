@@ -243,7 +243,11 @@ func (p *PipelineSessionStore) ClaimRunning(ctx context.Context, id, instanceNon
 
 // Reject atomically transitions PLANNED → REJECTED and discards the stored
 // stages. A repeated reject returns the same REJECTED record (idempotent).
-func (p *PipelineSessionStore) Reject(ctx context.Context, id string) (*PipelineSessionRecord, error) {
+// instanceNonce identifies the calling server instance: a RUNNING session
+// claimed by a DIFFERENT instance (an interrupted run) may be discarded, since
+// nothing is running to protect (owner ruling 2026-11-25); a same-instance
+// RUNNING session refuses with ErrSessionRunning.
+func (p *PipelineSessionStore) Reject(ctx context.Context, id, instanceNonce string) (*PipelineSessionRecord, error) {
 	var rejected PipelineSessionRecord
 	err := p.store.UpdateWithRetryCtx(ctx, func(txn *badger.Txn) error {
 		rec, err := p.readTxn(txn, id)
@@ -253,6 +257,22 @@ func (p *PipelineSessionStore) Reject(ctx context.Context, id string) (*Pipeline
 		if rec.Status == SessionRejected {
 			rejected = *rec
 			return nil
+		}
+		if rec.Status == SessionRunning {
+			if rec.InstanceNonce == instanceNonce {
+				// Same instance: a live run is protected.
+				return ErrSessionRunning
+			}
+			// Interrupted run (another instance): discardable, but the claim
+			// still wins the race — checkTransitionable below refuses RUNNING,
+			// so a concurrent ClaimRunning and Reject cannot both succeed.
+			// The interrupt discard is allowed only when the claim has not
+			// happened in this transaction's snapshot; a conflict retries.
+			rec.Status = SessionRejected
+			rec.Stages = nil
+			rec.UpdatedAt = time.Now().Unix()
+			rejected = *rec
+			return p.writeTxn(txn, rec)
 		}
 		if err := checkTransitionable(rec); err != nil {
 			return err
@@ -355,38 +375,6 @@ func (p *PipelineSessionStore) writeTxn(txn *badger.Txn, rec *PipelineSessionRec
 	}
 	e := badger.NewEntry(sessionKey(rec.SessionID), compressed).WithTTL(ttl)
 	return txn.SetEntry(e)
-}
-
-// OverwriteForTest replaces a stored PLANNED record without a transition rule.
-// Test seam only: it refuses any record whose stored or supplied status is not
-// PLANNED, so no running or terminal state can be rewritten through it (0005's
-// P3: no exported way to write a state without its transition rule).
-func (p *PipelineSessionStore) OverwriteForTest(ctx context.Context, rec *PipelineSessionRecord) error {
-	if rec.Status != SessionPlanned {
-		return fmt.Errorf("OverwriteForTest: supplied status %s is not PLANNED", rec.Status)
-	}
-	val, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
-	compressed, err := util.Compress(val)
-	if err != nil {
-		return err
-	}
-	return p.store.UpdateWithRetryCtx(ctx, func(txn *badger.Txn) error {
-		stored, err := p.readTxn(txn, rec.SessionID)
-		if err != nil {
-			return err
-		}
-		if stored.Status != SessionPlanned {
-			return fmt.Errorf("OverwriteForTest: stored status %s is not PLANNED", stored.Status)
-		}
-		ttl := time.Until(time.Unix(rec.ExpiresAt, 0)) + tombstoneGrace
-		if ttl <= 0 {
-			ttl = tombstoneGrace
-		}
-		return txn.SetEntry(badger.NewEntry(sessionKey(rec.SessionID), compressed).WithTTL(ttl))
-	})
 }
 
 // rawValue reads the stored compressed bytes of a session (test seam for the

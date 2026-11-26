@@ -240,7 +240,7 @@ func (h *OrchestratorHandler) rejectPipelineSession(ctx context.Context, session
 	if ps == nil {
 		return pipelineTextResult("execute_pipeline: unknown_session — no store available."), nil
 	}
-	rec, err := ps.Reject(ctx, sessionID)
+	rec, err := ps.Reject(ctx, sessionID, h.pipelineInstanceNonce)
 	if err != nil {
 		return pipelineTextResult(pipelineSessionRefusalText(err.Error(), nil)), nil
 	}
@@ -303,39 +303,5 @@ func artifactURIsOf(res *mcp.CallToolResult) []string {
 func (h *OrchestratorHandler) countPipelineStepForTest() {
 	if h.pipelineTestCountStep != nil {
 		h.pipelineTestCountStep()
-	}
-}
-
-// createPlannedForTest, rejectForTest, setPlanHashForTest, setStagesForTest are
-// test-only helpers reached through the handler's bound store. They are plain
-// functions (not methods on the non-local db type) and are called only from
-// _test.go files.
-func createPlannedForTest(ctx context.Context, p *db.PipelineSessionStore, rec *pipelineSessionRecord) error {
-	return p.CreatePlanned(ctx, rec)
-}
-
-func rejectForTest(ctx context.Context, p *db.PipelineSessionStore, id string) (*pipelineSessionRecord, error) {
-	return p.Reject(ctx, id)
-}
-
-func setPlanHashForTest(ctx context.Context, p *db.PipelineSessionStore, id, hash string) {
-	rec, err := p.Get(ctx, id)
-	if err != nil {
-		return
-	}
-	rec.PlanHash = hash
-	if err := p.OverwriteForTest(ctx, rec); err != nil {
-		slog.Warn("execute_pipeline test helper: overwrite failed", keyError, err)
-	}
-}
-
-func setStagesForTest(ctx context.Context, p *db.PipelineSessionStore, id string, stages []PipelineStep) {
-	rec, err := p.Get(ctx, id)
-	if err != nil {
-		return
-	}
-	rec.Stages = toDBStages(stages)
-	if err := p.OverwriteForTest(ctx, rec); err != nil {
-		slog.Warn("execute_pipeline test helper: overwrite failed", keyError, err)
 	}
 }

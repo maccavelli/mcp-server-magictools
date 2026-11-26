@@ -463,4 +463,13 @@ fleet host). Left for the owner: reject of an interrupted RUNNING row (returns `
 reject only transitions PLANNED — ruling needed), and `OverwriteForTest` exported-but-PLANNED-restricted
 (the "no exported write without a transition rule" wording vs a test seam — ruling needed).
 
+### Owner rulings — 2026-11-25 (post-review amendments)
+
+1. **Interrupted run may be discarded.** Reject of a RUNNING session claimed by another server
+   instance transitions it to REJECTED (nothing is running to protect). A same-instance RUNNING
+   session still refuses reject with `session_running`. MADR D2.6 amended.
+2. **`OverwriteForTest` build-tagged.** The test seam moves behind a build tag so production builds
+   carry no exported write without a transition rule. The `make build`/`install` path (tags `netgo`)
+   does not include it; `go test` runs with the tag.
+
 No later phase has run yet.

@@ -56,8 +56,8 @@ windows-amd64: ## Compiles for Windows AMD64
 clean: ## Removes all build artifacts
 	rm -rf $(DIST_DIR)
 
-test: ## Runs all tests with verbose output
-	go test -v ./...
+test: ## Runs all tests with verbose output (magictoolstestseam enables the pipeline test seams)
+	go test -v -tags magictoolstestseam ./...
 
 fmt: ## Formats all Go source files
 	go fmt ./...

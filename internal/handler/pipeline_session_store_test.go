@@ -1,3 +1,5 @@
+//go:build magictoolstestseam
+
 package handler
 
 import (
@@ -333,7 +335,7 @@ func TestExecutePipelineContinuation_RefusalLeavesPlanned(t *testing.T) {
 	if got.Status != "PLANNED" {
 		t.Fatalf("refusal must leave the session PLANNED, got %s", got.Status)
 	}
-	if _, err := ps.Reject(ctx, id); err != nil {
+	if _, err := ps.Reject(ctx, id, e.h.pipelineInstanceNonce); err != nil {
 		t.Fatalf("reject after refusal: %v", err)
 	}
 }

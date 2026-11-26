@@ -105,6 +105,10 @@ each in executable form:
 * **D2.5 L-a**: persisted under its own key prefix; `PLANNED` valid 24 hours; terminal sessions kept as
   tombstones for one hour; at most 50 `PLANNED`, evicting the oldest; an interrupted run refused.
 * **D2.6 A-a**: the claim is one atomic store transaction; the loser is refused with the winner's state.
+**Owner ruling 2026-11-25 (amendment):** an interrupted RUNNING session (claimed by a previous server
+instance) may be discarded — `reject: true` transitions it to REJECTED. A same-instance RUNNING session
+still refuses reject (`session_running`); the interrupted case is the one exception, because nothing is
+running to protect.
 * **D2.7 G-a**: unknown arguments and wrong types are refused by the handler.
 
 ## Decision Drivers
@@ -211,7 +215,7 @@ thing on every route.
 | Continuation of a `COMPLETED` session | decided | `session_already_run`, quoting the stored artifact URIs. Handler test. |
 | Continuation of a `FAILED` session | decided | `session_failed`. Handler test. |
 | Continuation of a `REJECTED` session | decided | `session_rejected`. Handler test. |
-| `RUNNING` session from another server instance (restart) | decided | `session_interrupted`; nothing resumed. Store test with instance nonce. |
+| `RUNNING` session from another server instance (restart) | decided | `session_interrupted` on continue; nothing resumed. `reject: true` discards it (owner ruling 2026-11-25). Store test with instance nonce. |
 | Stored `plan_hash` ≠ supplied | decided | `plan_hash_mismatch`, nothing runs. Handler test. |
 | A stored stage's tool no longer resolves | decided | `plan_stale`, the stage named, zero stages run. Handler test. |
 | 51st `PLANNED` session | decided | Oldest evicted. Store test. |
