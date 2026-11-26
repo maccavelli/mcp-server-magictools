@@ -134,7 +134,7 @@ Building requires the Go version declared by `go.mod` (currently `go 1.26.11`, b
 git clone https://github.com/maccavelli/mcp-server-magictools.git
 cd mcp-server-magictools
 make build
-./bin/mcp-server-magictools-darwin-arm64 --version
+./dist/mcp-server-magictools-darwin-arm64 --version
 ```
 
 `make build-all` cross-compiles the three release targets. CI additionally runs

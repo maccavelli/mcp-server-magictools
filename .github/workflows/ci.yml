@@ -118,7 +118,7 @@ jobs:
 
           make build-all VERSION="$TAG"
 
-          f="bin/mcp-server-magictools-linux-amd64"
+          f="dist/mcp-server-magictools-linux-amd64"
           test -f "$f" || { echo "error: missing $f" >&2; exit 1; }
           got="$("./$f" --version 2>&1 | awk '{print $NF}')"
           test "$got" = "$VER" || {
@@ -126,7 +126,7 @@ jobs:
             exit 1
           }
 
-          for bin in bin/mcp-server-magictools-*; do
+          for bin in dist/mcp-server-magictools-*; do
             if ! go version -m "$bin" | grep -q '^	build	CGO_ENABLED=0$'; then
               echo "error: $bin is not CGO_ENABLED=0 — refusing to publish" >&2
               go version -m "$bin" | grep -i cgo >&2 || true
@@ -136,7 +136,7 @@ jobs:
           done
 
           (
-            cd bin
+            cd dist
             rm -f SHA256SUMS SHA256SUMS.tmp
             set --
             for f in *; do
@@ -148,7 +148,7 @@ jobs:
             mv SHA256SUMS.tmp SHA256SUMS
             cat SHA256SUMS
           )
-          ls -lh bin/
+          ls -lh dist/
           {
             echo "### Go binaries"
             echo "Stamped: \`$VER\` from tag \`$TAG\`"
@@ -160,7 +160,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mcp-server-magictools-${{ steps.build.outputs.version || github.sha }}
-          path: bin/
+          path: dist/
           if-no-files-found: error
 
   # Cross-compiling proves a target links; native execution proves it works.
@@ -229,7 +229,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mcp-server-magictools-${{ needs.go.outputs.version || github.sha }}
-          path: bin
+          path: dist
 
       - name: Smoke binaries
         shell: bash
@@ -239,7 +239,7 @@ jobs:
           EXT: ${{ matrix.ext }}
         run: |
           set -euo pipefail
-          f="bin/mcp-server-magictools-${SUFFIX}${EXT}"
+          f="dist/mcp-server-magictools-${SUFFIX}${EXT}"
           test -f "$f" || { echo "error: $f missing from the artifact" >&2; exit 1; }
           chmod +x "$f" || true
           got="$("./$f" --version 2>&1 | awk '{print $NF}')"
