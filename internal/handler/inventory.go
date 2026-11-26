@@ -7,6 +7,7 @@ var InternalToolsInventoryJSON = []byte(`
 [
   {
     "name": "sync_servers",
+    "title": "Refresh server tool index",
     "description": "[DIRECTIVE: Lifecycle Sync] Refreshes and updates the local metadata index and tool schemas of registered sub-servers. Use when new tools are added or schemas changed. Keywords: refresh-schema sync-metadata metadata-index update-registry",
     "category": "orchestrator",
       "annotations": {
@@ -28,6 +29,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "wake_servers",
+    "title": "Start sleeping servers",
     "description": "[DIRECTIVE: Process Standby] Wakes sleeping, inactive, or suspended sub-server processes to hot standby to eliminate cold-start tool latencies. Keywords: warm-up-servers unpause-processes prevent-cold-starts wake-standby",
     "category": "orchestrator",
       "annotations": {
@@ -44,6 +46,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "reload_servers",
+    "title": "Restart servers",
     "description": "[DIRECTIVE: Process Reboot] Force-terminates and reboots sub-server processes to recover from socket timeouts, process hangs, or memory leaks. Keywords: hard-restart crash-recovery reboot-process kill-hangs",
     "category": "orchestrator",
       "annotations": {
@@ -65,6 +68,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "get_internal_logs",
+    "title": "Read gateway logs",
     "description": "[DIRECTIVE: Orchestrator Log Dump] Retrieves raw, unfiltered stdout/stderr logs directly from the magictools orchestrator process itself. Use strictly for debugging orchestrator-level boot errors, proxy routing failures, or config crashes. Keywords: raw-stdout log-dump debug-orchestrator process-stderr",
     "category": "orchestrator",
       "annotations": {
@@ -91,6 +95,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "get_session_stats",
+    "title": "Show session metrics",
     "description": "[DIRECTIVE: Telemetry Overhead Analyzer] Emits dynamic network metrics, overhead latencies, and payload throughput calculations for active sub-server channels. Keywords: network-latency throughput-bytes payload-sizes serialization-time",
     "category": "orchestrator",
       "annotations": {
@@ -105,6 +110,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "get_health_report",
+    "title": "Show server health",
     "description": "[DIRECTIVE: Server Health Status] Inspects and returns the up/down running status, uptime duration, memory allocation, and CPU load for all registered MCP servers. Keywords: query-uptime server-up-down process-load memory-rss",
     "category": "orchestrator",
       "annotations": {
@@ -121,6 +127,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "analyze_system_logs",
+    "title": "Filter gateway logs by severity",
     "description": "[DIRECTIVE: Semantic Log Parser] Analyzes and filters orchestrator logs to detect organic error patterns, trace exception severity levels, and isolate multi-server error telemetry. Keywords: error-telemetry filter-severity trace-exception parse-syslog",
     "category": "orchestrator",
       "annotations": {
@@ -156,6 +163,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "align_tools",
+    "title": "Find the right tool",
     "description": "[DIRECTIVE: Tool Discovery Catalog] Resolves natural language intent queries into matched tool names, server URNs, and usage schemas. MANDATE: You MUST run this tool with full_schema=true before invoking any downstream tool via call_proxy to verify its required parameters. Keywords: find-tool tool-catalog schema-lookup intent-resolve",
     "category": "orchestrator",
       "annotations": {
@@ -198,6 +206,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "call_proxy",
+    "title": "Run a downstream tool",
     "description": "[DIRECTIVE: Proxy Execution Runner] Executes a verified tool URN with the mapped argument payload on a downstream MCP sub-server. MANDATE: Before calling this tool for a URN, you MUST first run align_tools with full_schema=true to retrieve its exact JSON schema and parameter requirements. Guessed arguments are strictly prohibited. Keywords: execute-urn run-downstream-tool dispatch-payload proxy-execution",
     "category": "orchestrator",
       "annotations": {
@@ -231,6 +240,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "update_config",
+    "title": "Change a gateway setting",
     "description": "[DIRECTIVE: Runtime Config Modifier] Writes persistent configuration changes (e.g. logLevel, trustServers) to storage instantly. Keywords: modify-config config-yaml change-parameter persist-setting",
     "category": "orchestrator",
       "annotations": {
@@ -276,6 +286,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "self_check",
+    "title": "Run gateway self-diagnostics",
     "description": "[DIRECTIVE: Internal Diagnostic Auditor] Audits the orchestrator's database sync status, cache hits/misses, and internal memory buffers. Keywords: cache-efficiency database-sync self-diagnostic internal-audit",
     "category": "orchestrator",
       "annotations": {
@@ -290,6 +301,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "list_tools",
+    "title": "List a server's tools",
     "description": "[DIRECTIVE: Server Tool Enumerator] Dumps the flat list of all registered tool names from a specific sub-server. Use when explicitly prompted to view a server's complete API index. Keywords: dump-api-list flat-tool-index enumerate-server-tools",
     "category": "orchestrator",
       "annotations": {
@@ -322,6 +334,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "semantic_similarity",
+    "title": "Find overlapping tools",
     "description": "[DIRECTIVE: Description Redundancy Auditor] Computes the cosine distance between tool schemas across the ecosystem to identify overlapping descriptions or naming redundancies. Keywords: cosine-distance description-overlap naming-redundancy audit-similarity",
     "category": "orchestrator",
       "annotations": {
@@ -347,6 +360,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "query_compliance",
+    "title": "Search coding standards",
     "description": "[DIRECTIVE: Vector Standards Finder] Searches the vector database for standards, mathematical design rules, and project-specific compliance guidelines using semantic embeddings. Keywords: find-standards compliance-rules query-embeddings design-boundaries",
     "category": "orchestrator",
       "annotations": {
@@ -369,6 +383,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "execute_pipeline",
+    "title": "Run an analysis pipeline",
     "description": "[DIRECTIVE: Pipeline Workflow Runner] Runs an orchestrated multi-stage analysis and mutation DAG. Two modes: fresh (target + intent, optional dry_run to preview and store a plan) or continuation (session_id alone to run a stored plan, session_id + reject: true to discard it). Keywords: run-workflow-dag sequential-pipeline execute-stages workflow-orchestrator",
     "category": "orchestrator",
       "annotations": {
@@ -416,6 +431,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "validate_pipeline_step",
+    "title": "Check a pipeline step's output",
     "description": "[DIRECTIVE: Pipeline Step Evaluator] Evaluates if the output of a specific workflow step meets the defined completion boundaries and post-run criteria. Keywords: evaluate-step-output verify-step-completion check-bounds post-step-check",
     "category": "orchestrator",
       "annotations": {
@@ -447,6 +463,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "cross_server_quality_gate",
+    "title": "Check pipeline readiness",
     "description": "[DIRECTIVE: Execution Safety Firewall] A blocking pre-execution quality gate that prevents file mutations until all safety limits and implementation plans are verified. Keywords: safety-firewall block-mutations verify-plan-safety pre-mutation-gate",
     "category": "orchestrator",
       "annotations": {
@@ -474,6 +491,7 @@ var InternalToolsInventoryJSON = []byte(`
   },
   {
     "name": "generate_audit_report",
+    "title": "Build a pipeline audit report",
     "description": "[DIRECTIVE: Telemetry Diff Publisher] Generates the final git diff and audit telemetry report upon pipeline completion. Keywords: publish-git-diff generate-audit-report finalize-session telemetry-report",
     "category": "orchestrator",
       "annotations": {

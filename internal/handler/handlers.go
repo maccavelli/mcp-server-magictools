@@ -28,6 +28,7 @@ import (
 // InternalTool represents an internal tool with metadata like category
 type InternalTool struct {
 	Name        string               `json:"name"`
+	Title       string               `json:"title,omitempty"`
 	Description string               `json:"description"`
 	Category    string               `json:"category,omitempty,omitzero"`
 	InputSchema any                  `json:"inputSchema"`
@@ -240,6 +241,7 @@ func (h *OrchestratorHandler) addTool(s *mcp.Server, t *mcp.Tool, handler mcp.To
 			// Map InternalTool to mcp.Tool
 			target = &mcp.Tool{
 				Name:        it.Name,
+				Title:       it.Title,
 				Description: it.Description,
 				InputSchema: it.InputSchema,
 				Annotations: it.Annotations,

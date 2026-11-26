@@ -94,6 +94,7 @@ func (l *listToolsLayers) staticInventory() []*mcp.Tool {
 		}
 		tools = append(tools, &mcp.Tool{
 			Name:        it.Name,
+			Title:       it.Title,
 			Description: it.Description,
 			InputSchema: it.InputSchema,
 			Annotations: it.Annotations,
