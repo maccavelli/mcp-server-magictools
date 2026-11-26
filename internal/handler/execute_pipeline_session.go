@@ -14,10 +14,6 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// pipelineSessionRecord aliases the store record for handler-side tests and
-// helpers; the wire contract is the db type.
-type pipelineSessionRecord = db.PipelineSessionRecord
-
 // pipelineInstanceNonce identifies this server process for the interrupted-run
 // rule: a RUNNING session claimed by another nonce is never resumed (0005's
 // D2.5 L-a). Generated once per handler.
@@ -188,10 +184,13 @@ func (h *OrchestratorHandler) continuePipelineSession(ctx context.Context, sessi
 			return pipelineTextResult(pipelineSessionRefusalText("plan_hash_mismatch", nil)), nil
 		}
 		for _, stage := range rec.Stages {
-			if h.Store != nil {
-				if tool, terr := h.Store.GetTool(stage.ToolName); terr != nil || tool == nil {
-					return pipelineTextResult(pipelineSessionRefusalText("plan_stale", nil) + " Stage: " + stage.ToolName), nil
-				}
+			if h.Store == nil {
+				continue
+			}
+			tool, terr := h.Store.GetTool(stage.ToolName)
+			if terr != nil || tool == nil {
+				// A missing tool is a plan_stale refusal, not a handler error.
+				return pipelineTextResult(pipelineSessionRefusalText("plan_stale", nil) + " Stage: " + stage.ToolName), nil //nolint:nilerr // refusal is a result, not an error
 			}
 		}
 	}

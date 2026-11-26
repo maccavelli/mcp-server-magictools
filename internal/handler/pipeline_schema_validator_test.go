@@ -1,3 +1,5 @@
+//go:build magictoolstestseam
+
 package handler
 
 import (

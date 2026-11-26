@@ -9,6 +9,10 @@ import (
 	"github.com/maccavelli/mcp-server-magictools/internal/db"
 )
 
+// pipelineSessionRecord aliases the store record for handler-side tests and
+// helpers; the wire contract is the db type.
+type pipelineSessionRecord = db.PipelineSessionRecord
+
 // createPlannedForTest, rejectForTest, setPlanHashForTest, setStagesForTest are
 // test-only helpers reached through the handler's bound store. They are plain
 // functions (not methods on the non-local db type) and are called only from
