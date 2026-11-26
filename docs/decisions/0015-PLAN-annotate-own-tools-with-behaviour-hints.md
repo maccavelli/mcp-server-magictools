@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 date: 2026-11-25
 associated-madr: "0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md"
 ---
@@ -206,4 +206,63 @@ migration; the annotations are wire metadata only.
 
 ## Execution record
 
-No phase has run yet.
+### Approval — 2026-11-25
+
+Owner: "accept the madr, plan approved to proceed". MADR already `accepted`; PLAN `in-progress`.
+
+### P0 — 2026-11-25, re-grounded at `315b69b` (pass 1)
+
+- HEAD `315b69b`, branch `main`, go1.27.4 darwin/arm64. Only uncommitted file: this plan (status).
+- `InternalTool` still four fields (`handlers.go:29-34`); `addTool` maps three (`:240-244`);
+  `staticInventory` maps three (`list_tools_handler.go:95-99`).
+- Inventory parsed: 18 tools, 0 annotations.
+- Spot-checks of the three non-obvious behaviour rows hold: `PingAll` at
+  `diagnostic_handlers.go:112`, artifact write at `semantic_similarity_handler.go:53`, synergy write
+  at `generate_audit_report.go:57`.
+- No deviation.
+
+### P1 — 2026-11-25, tests first (pass 1)
+
+- `internal/handler/inventory_annotations_test.go`: `TestInventoryAnnotations` pins all 18 entries
+  against the D1 table, including raw-JSON presence/absence of the meaningless hints.
+- `internal/handler/annotations_wire_test.go` (behind `magictoolstestseam`): `TestAnnotationsOnWire`,
+  `TestAnnotationsOnStaticFallback`, `TestSanitiserPreservesAnnotations`.
+- Seen red: `tl.Annotations undefined` (no field yet) — the stated reason.
+- Wire-test finding: `get_internal_logs`'s mcplib copy confirmed annotation-free on the wire by direct
+  probe; the test now pins that absence explicitly (MADR S5), rather than skipping the tool.
+
+### P2 — 2026-11-25, plumbing and inventory (pass 1, commit `635a054`)
+
+- `InternalTool.Annotations *mcp.ToolAnnotations` added; `addTool` and `staticInventory` map it.
+- All 18 inventory entries carry the D1 annotations; JSON validated, 18/18 annotated.
+- All P1 tests green; existing handler + util suites green; `go vet` tagged and untagged clean.
+
+### P3 — 2026-11-25/26, plants and gates (pass 1)
+
+**Plants (scratch copies of `git archive HEAD`, each seen to fail):**
+
+| Plant | Test that failed | First failure line |
+| :--- | :--- | :--- |
+| self_check readOnlyHint flipped | `TestInventoryAnnotations` | `self_check: readOnlyHint = false, want true` |
+| addTool drops Annotations | `TestAnnotationsOnWire` | `align_tools: no annotations on the wire` |
+| staticInventory drops Annotations | `TestAnnotationsOnStaticFallback` | `sync_servers: fallback carries no annotations` |
+| query_compliance gains destructiveHint | `TestInventoryAnnotations` | `destructiveHint present (false), must be absent` |
+| sanitiser strips annotations | `TestSanitiserPreservesAnnotations` | `sanitiser stripped annotations` |
+
+**Gates:**
+
+- Full suite `-tags magictoolstestseam ./... -count=1` on the windows fleet host: exit 0.
+- `make lint` (local, via `run-heavy`): **0 issues**. The first fleet lint run found 4: three in this
+  session's earlier 0013 files (nilerr on the plan_stale refusal, unused `pipelineSessionRecord` alias
+  and `jsonschemaCompile` in production builds) — fixed in commit `17ef569` (refusal annotated
+  `//nolint:nilerr` with rationale; alias and validator helper moved behind the seam tag). The fourth
+  (`service_lifecycle.go:69` SA4023) did not reproduce in the local run; it remains record 0012's.
+- `go vet` tagged and untagged: clean. `gofmt`: clean. `check_records.py --check`: exit 0.
+  `markdownlint-cli2` on this plan: 0 issues.
+- Fleet lint re-runs after the fixes failed on host logistics (WSL toolchain gap, then a queue
+  timeout); the local `run-heavy` run is the recorded gate evidence.
+
+**Completion criteria:** all five met — D1 values pinned in the inventory, both emission paths pinned,
+sanitiser passthrough pinned, every plant failed, no handler behaviour changed (existing tests green).
+
+PLAN status: `implemented` pending the owner's acceptance of the execution record.
