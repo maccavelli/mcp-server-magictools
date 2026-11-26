@@ -80,7 +80,10 @@ var InternalToolsInventoryJSON = []byte(`
         },
         "max_lines": {
           "type": "integer",
-          "description": "Integer limit of recent raw log lines to return (0-1000). Defaults to 25."
+          "description": "Integer limit of recent raw log lines to return (0-1000). Defaults to 25. Values outside the range are clamped, not refused; 0 or less uses the default.",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 25
         }
       },
       "additionalProperties": false
@@ -133,7 +136,10 @@ var InternalToolsInventoryJSON = []byte(`
         },
         "lines": {
           "type": "integer",
-          "description": "Integer limit of logs to parse (default 50)."
+          "description": "Integer limit of logs to parse (default 50, maximum 1000). Values above 1000 are clamped; 0 or less uses the default.",
+          "minimum": 1,
+          "maximum": 1000,
+          "default": 50
         },
         "severity": {
           "type": "string",
@@ -246,15 +252,19 @@ var InternalToolsInventoryJSON = []byte(`
             "logFormat",
             "scoreThreshold",
             "confidenceGap",
+            "vector_enabled",
             "validateProxyCalls",
             "pinnedServers",
             "trustServers",
-            "squeezeBypass"
+            "squeezeBypass",
+            "ringBufferTargets",
+            "tokenSpendThresh",
+            "lruLimit"
           ]
         },
         "value": {
           "type": "string",
-          "description": "String payload value to write to configuration."
+          "description": "String payload value to write to configuration. Per-key rules: squeezeLevel integer 0-5; scoreThreshold and confidenceGap float 0.0-1.0; logFormat json or text; tokenSpendThresh integer >= 0; lruLimit integer >= 1; boolean keys (vector_enabled, validateProxyCalls, squeezeBypass) accept true/1/yes/on or false/0/no/off; logLevel and mcpLogLevel accept ERROR, WARN, INFO, DEBUG, TRACE; pinnedServers, trustServers and ringBufferTargets take space-separated names."
         }
       },
       "required": [
@@ -295,10 +305,13 @@ var InternalToolsInventoryJSON = []byte(`
         },
         "options": {
           "type": "object",
+          "description": "Optional listing controls.",
           "properties": {
             "max_tools": {
               "type": "integer",
-              "description": "Maximum number of tools to return."
+              "description": "Maximum number of tools to return. Defaults to 1000; no upper bound.",
+              "minimum": 1,
+              "default": 1000
             }
           },
           "additionalProperties": false
