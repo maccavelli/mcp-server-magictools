@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 date: 2026-11-26
 associated-madr: "0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md"
 ---
@@ -136,4 +136,8 @@ the standard's 2020-12 default — the same semantics, less explicit. No stored 
 
 ## Execution record
 
-No phase has run. Awaiting owner approval.
+### Approval — 2026-11-26
+
+Owner: "accept d2, approval to proceed." D2 accepted; D3 and D4 approved. PLAN `in-progress`;
+commit and push to `main` authorized for this session (standing from the D2 approval turn).
+D3 executes first; this plan follows.

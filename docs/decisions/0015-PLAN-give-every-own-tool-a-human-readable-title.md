@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: in-progress
 date: 2026-11-26
 associated-madr: "0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md"
 ---
@@ -142,4 +142,68 @@ display `name` again (the SDK's last-precedence display source). No stored data,
 
 ## Execution record
 
-No phase has run. Awaiting owner approval.
+### Approval — 2026-11-26
+
+Owner: "accept d2, approval to proceed." D2 accepted; D3 and D4 approved. PLAN `in-progress`;
+commit and push to `main` authorized for this session (standing from the D2 approval turn).
+D3 executes first, then D4 (both serialize on `inventory.go`).
+
+### P0 — 2026-11-26, re-grounded at `96d9439` (pass 1)
+
+- `InternalTool` five fields, no `Title` (`handlers.go:29-35`); `addTool` maps four spec fields
+  (`:241-246`); `staticInventory` the same (`list_tools_handler.go:96-100`).
+- Inventory: 18 `"name":` entries, 0 `"title"` keys.
+- D1 helpers confirmed reusable: `newTestHandler` (`common_test.go:13`), `emittedToolsList`
+  (`pipeline_session_store_test.go:19`, behind `magictoolstestseam`), the S5 explicit-absence
+  pattern (`annotations_wire_test.go`).
+- No deviation.
+
+### P1 — 2026-11-26, tests first (pass 1)
+
+- `internal/handler/inventory_titles_test.go`: `d3Titles()` mirrors the MADR's D3 table;
+  `TestInventoryTitles` pins presence, non-emptiness, distinctness from `name`, exact wording.
+- `internal/handler/titles_wire_test.go` (behind `magictoolstestseam`): `TestTitlesOnWire`
+  (17 titled own tools on the wire; `get_internal_logs` pinned title-free per S5),
+  `TestTitlesOnStaticFallback` (all 18).
+- Seen red: `tl.Title undefined (type InternalTool has no field or method Title)` — the stated
+  reason.
+
+### P2 — 2026-11-26, plumbing and inventory (pass 1)
+
+- `InternalTool` gains `Title string` (`json:"title,omitempty"`); `addTool` and
+  `staticInventory` map it.
+- All 18 inventory entries carry the D3 title verbatim.
+- `TestInventoryTitles`, `TestTitlesOnWire`, `TestTitlesOnStaticFallback` green; D1/D2 guards
+  still green (`TestInventoryAnnotations`, `TestAnnotationsOn*`, `TestInventoryConstraints`).
+- `gofmt` clean; `make vet` clean.
+
+### P3 — 2026-11-26, plants and gates (pass 1)
+
+**Plants (scratch copy of `git archive HEAD` plus the P1/P2 working files, each seen to fail):**
+
+| Plant | Test that failed | First failure line |
+| :--- | :--- | :--- |
+| self_check title changed | `TestInventoryTitles` | `self_check: title = "Gateway self check", want "Run gateway self-diagnostics"` |
+| addTool drops Title | `TestTitlesOnWire` | `align_tools: wire title = "", want "Find the right tool"` |
+| staticInventory drops Title | `TestTitlesOnStaticFallback` | `sync_servers: fallback title = "", want "Refresh server tool index"` |
+| wake_servers title removed | `TestInventoryTitles` | `wake_servers: no title` |
+| align_tools title set to its name | `TestInventoryTitles` | `align_tools: title equals the programmatic name` |
+
+Scratch copies cleaned up after the runs.
+
+**Gates:**
+
+- `make test` on `<windows-host>` via `run-on-host --need any`: exit 0, 713 top-level passes,
+  0 failures; `TestInventoryTitles`, `TestTitlesOnWire`, `TestTitlesOnStaticFallback` all PASS.
+- `make lint` on `<linux-host>` via `run-on-host --need linux`: exit 2, one finding — the
+  pre-existing `service_lifecycle.go:69` SA4023 (record 0012's, linux-only, out of scope).
+  No finding in this plan's files. A local `run-heavy` lint re-run was not forced: the local
+  queue was busy with other sessions' gates, and D2's local run on the same toolchain already
+  recorded 0 issues; the linux run confirms no new finding.
+- `make vet`: clean. `gofmt -l internal/handler/`: clean. `make check-records`: exit 0.
+  `make markdownlint`: 0 issues.
+
+**Completion criteria:** all three met — 18 titles pinned in the inventory, both emission paths
+pinned, every plant failed and gates green with no handler behaviour change.
+
+PLAN remains `in-progress` pending owner acceptance of the execution.
