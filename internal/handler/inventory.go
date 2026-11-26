@@ -17,6 +17,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "names": {
@@ -39,6 +40,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {},
       "additionalProperties": false
@@ -56,6 +58,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "names": {
@@ -76,6 +79,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "session_id": {
@@ -103,6 +107,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {},
       "additionalProperties": false
@@ -120,6 +125,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {},
       "additionalProperties": false
@@ -135,6 +141,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "server_id": {
@@ -173,6 +180,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": true
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "query": {
@@ -216,6 +224,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": true
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "urn": {
@@ -250,6 +259,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "key": {
@@ -294,6 +304,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {},
       "additionalProperties": false
@@ -309,6 +320,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "server_name": {
@@ -344,6 +356,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "servers": {
@@ -368,6 +381,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "query": {
@@ -393,6 +407,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": true
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "session_id": {
@@ -439,6 +454,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "step_name": {
@@ -471,6 +487,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "project_path": {
@@ -501,6 +518,7 @@ var InternalToolsInventoryJSON = []byte(`
         "openWorldHint": false
       },
     "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "target": {
