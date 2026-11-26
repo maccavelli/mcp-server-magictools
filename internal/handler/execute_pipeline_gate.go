@@ -47,6 +47,10 @@ func classifyPipelineArgs(raw json.RawMessage) pipelineGateOutcome {
 		if err := dec.Decode(&args); err != nil {
 			return refuse("bad_arguments")
 		}
+		if dec.More() {
+			// A second JSON value after the object is not a valid argument set.
+			return refuse("bad_arguments")
+		}
 	}
 
 	hasSession := args.SessionID != ""

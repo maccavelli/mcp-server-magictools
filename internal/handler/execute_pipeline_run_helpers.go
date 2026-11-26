@@ -261,6 +261,7 @@ func (h *OrchestratorHandler) freshRunPostLoopMutators(
 		if res := freshCheckCancelled(ctx, state.results, warnings, sessionID); res != nil {
 			return res
 		}
+		h.countPipelineStepForTest()
 		slog.Info("execute_pipeline: executing post-loop MUTATOR step", keyURN, step.ToolName, "role", step.Role)
 		telemetry.GlobalDAGTracker.UpdateActiveNode(step.ToolName, 0, 0, 0, "EXECUTING", "")
 		if step.Role == roleMutator && strings.Contains(step.ToolName, "apply_vetted_edit") {

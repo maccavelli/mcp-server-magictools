@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/maccavelli/mcp-server-magictools/internal/db"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -243,6 +244,47 @@ func TestExecutePipelineContinuation_Refusals(t *testing.T) {
 			mk(id)
 			setStagesForTest(ctx, ps, id, []PipelineStep{{ToolName: "gone:tool", Role: "ANALYZER", Phase: 1}})
 		}, map[string]any{"session_id": "ep-stale"}, "plan_stale"},
+		{"session_running", func(id string) {
+			mk(id)
+			if _, err := ps.ClaimRunning(ctx, id, e.h.pipelineInstanceNonce); err != nil {
+				t.Fatal(err)
+			}
+		}, map[string]any{"session_id": "ep-run"}, "session_running"},
+		{"session_already_run", func(id string) {
+			mk(id)
+			if _, err := ps.ClaimRunning(ctx, id, e.h.pipelineInstanceNonce); err != nil {
+				t.Fatal(err)
+			}
+			if err := ps.Complete(ctx, id, []string{"mcp://magictools/raw/pipeline_" + id + "_plan"}); err != nil {
+				t.Fatal(err)
+			}
+		}, map[string]any{"session_id": "ep-done"}, "session_already_run"},
+		{"session_failed", func(id string) {
+			mk(id)
+			if _, err := ps.ClaimRunning(ctx, id, e.h.pipelineInstanceNonce); err != nil {
+				t.Fatal(err)
+			}
+			if err := ps.Fail(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+		}, map[string]any{"session_id": "ep-fail"}, "session_failed"},
+		{"session_interrupted", func(id string) {
+			mk(id)
+			if _, err := ps.ClaimRunning(ctx, id, "other-instance-nonce"); err != nil {
+				t.Fatal(err)
+			}
+		}, map[string]any{"session_id": "ep-int"}, "session_interrupted"},
+		{"expired_session", func(id string) {
+			mk(id)
+			rec, err := ps.Get(ctx, id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rec.ExpiresAt = time.Now().Add(-time.Minute).Unix()
+			if err := ps.OverwriteForTest(ctx, rec); err != nil {
+				t.Fatal(err)
+			}
+		}, map[string]any{"session_id": "ep-exp"}, "expired_session"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -257,6 +299,41 @@ func TestExecutePipelineContinuation_Refusals(t *testing.T) {
 			if e.calls.Load() != before {
 				t.Fatalf("%s executed stages", tc.name)
 			}
+			if tc.name == "session_already_run" && !strings.Contains(text, "mcp://magictools/raw/pipeline_ep-done_plan") {
+				t.Fatalf("session_already_run must quote the stored artifact URIs; got:\n%s", text)
+			}
 		})
+	}
+}
+
+// TestExecutePipelineContinuation_RefusalLeavesPlanned: a plan_hash mismatch or
+// plan_stale refusal must not claim the session — it stays PLANNED and can be
+// rejected afterwards (independent review, important finding).
+func TestExecutePipelineContinuation_RefusalLeavesPlanned(t *testing.T) {
+	e := newPipelineContractEnv(t)
+	ctx := context.Background()
+	ps := e.h.pipelineSessions
+	id := "ep-stay-planned"
+	rec := &pipelineSessionRecord{
+		SessionID: id, Target: "/tmp/x", Intent: "analyze",
+		Status: "PLANNED", PlanHash: "stored-hash",
+		Stages: []db.PipelineStage{{ToolName: "brainstorm:analyzer", Role: "ANALYZER", Phase: 1}},
+	}
+	if err := createPlannedForTest(ctx, ps, rec); err != nil {
+		t.Fatal(err)
+	}
+	res := e.call(t, map[string]any{"session_id": id, "plan_hash": "wrong-hash"})
+	if !strings.Contains(resultText(res), "plan_hash_mismatch") {
+		t.Fatalf("want plan_hash_mismatch; got:\n%s", resultText(res))
+	}
+	got, err := ps.Get(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "PLANNED" {
+		t.Fatalf("refusal must leave the session PLANNED, got %s", got.Status)
+	}
+	if _, err := ps.Reject(ctx, id); err != nil {
+		t.Fatalf("reject after refusal: %v", err)
 	}
 }

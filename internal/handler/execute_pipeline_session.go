@@ -181,6 +181,21 @@ func (h *OrchestratorHandler) continuePipelineSession(ctx context.Context, sessi
 		return pipelineTextResult(pipelineSessionRefusalText("session_rejected", nil)), nil
 	}
 
+	// Plan-hash and pre-flight checks run BEFORE the claim, so a refusal never
+	// leaves the session stuck RUNNING (independent review, important finding).
+	if rec.Status == db.SessionPlanned {
+		if rec.PlanHash != "" && planHash != rec.PlanHash {
+			return pipelineTextResult(pipelineSessionRefusalText("plan_hash_mismatch", nil)), nil
+		}
+		for _, stage := range rec.Stages {
+			if h.Store != nil {
+				if tool, terr := h.Store.GetTool(stage.ToolName); terr != nil || tool == nil {
+					return pipelineTextResult(pipelineSessionRefusalText("plan_stale", nil) + " Stage: " + stage.ToolName), nil
+				}
+			}
+		}
+	}
+
 	claimed, err := ps.ClaimRunning(ctx, sessionID, h.pipelineInstanceNonce)
 	if err != nil {
 		var uris []string
@@ -190,25 +205,6 @@ func (h *OrchestratorHandler) continuePipelineSession(ctx context.Context, sessi
 			}
 		}
 		return pipelineTextResult(pipelineSessionRefusalText(err.Error(), uris)), nil
-	}
-
-	if claimed.PlanHash != "" && planHash != claimed.PlanHash {
-		if ferr := ps.Fail(ctx, sessionID); ferr != nil {
-			slog.Warn("execute_pipeline: failed to mark session failed", keySessionID, sessionID, keyError, ferr)
-		}
-		return pipelineTextResult(pipelineSessionRefusalText("plan_hash_mismatch", nil)), nil
-	}
-
-	// Pre-flight: every stored stage's tool must still resolve, before any run.
-	for _, stage := range claimed.Stages {
-		if h.Store != nil {
-			if tool, terr := h.Store.GetTool(stage.ToolName); terr != nil || tool == nil {
-				if ferr := ps.Fail(ctx, sessionID); ferr != nil {
-					slog.Warn("execute_pipeline: failed to mark session failed", keySessionID, sessionID, keyError, ferr)
-				}
-				return pipelineTextResult(pipelineSessionRefusalText("plan_stale", nil) + " Stage: " + stage.ToolName), nil
-			}
-		}
 	}
 
 	stages := fromDBStages(claimed.Stages)
@@ -259,14 +255,22 @@ func (h *OrchestratorHandler) rejectPipelineSession(ctx context.Context, session
 		marshalIndentOrEmpty(envelope), rec.SessionID)), nil
 }
 
-// resultStatusOf reads the status from a pipeline result envelope.
+// resultStatusOf reads the status from the result envelope's metadata, parsed
+// as JSON rather than substring-matched (independent review: a step error
+// containing the substring must not decide the session's terminal state).
 func resultStatusOf(res *mcp.CallToolResult) string {
 	text := resultTextOf(res)
-	if strings.Contains(text, `"status": "`+statusCompleted+`"`) {
-		return statusCompleted
-	}
-	if strings.Contains(text, `"status": "`+statusFailed+`"`) {
-		return statusFailed
+	start := strings.Index(text, "```json\n")
+	end := strings.Index(text, "\n```")
+	if start >= 0 && end > start {
+		var envelope struct {
+			Metadata struct {
+				Status string `json:"status"`
+			} `json:"metadata"`
+		}
+		if err := json.Unmarshal([]byte(text[start+8:end]), &envelope); err == nil && envelope.Metadata.Status != "" {
+			return envelope.Metadata.Status
+		}
 	}
 	return statusFailed
 }
