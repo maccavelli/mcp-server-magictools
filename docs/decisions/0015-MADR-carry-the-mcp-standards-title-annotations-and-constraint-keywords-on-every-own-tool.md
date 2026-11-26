@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-11-25
 decision-makers: repository owner
 consulted: "0014-REPORT-mcp-tool-schema-and-description-adherence.md (the audit this record answers);
