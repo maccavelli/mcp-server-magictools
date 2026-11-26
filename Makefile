@@ -21,7 +21,7 @@ markdownlint:
 
 MOD_VERSION := 1.26.11
 BINARY_NAME=mcp-server-magictools
-DIST_DIR=dist
+DIST_DIR=bin
 GIT_VERSION=$(shell git describe --tags --always --dirty 2>/dev/null)
 VERSION?=$(GIT_VERSION)
 # BUILD_KIND is "release" only for a tag build (MADR 0005).

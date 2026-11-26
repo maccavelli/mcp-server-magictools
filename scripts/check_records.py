@@ -75,7 +75,7 @@ SUPERSEDED_RE = re.compile(r"^superseded by (\d{4}-(?:MADR|PLAN)-.+\.md)$")
 KIND_SUFFIX = {"MADR": "docs/decisions", "PLAN": "docs/decisions",
                "REPORT": "docs/reports", "GATES": "docs/reports"}
 RECORD_DIRS = ("docs/decisions", "docs/reports")
-SKIP_PARTS = {".git", "node_modules", "vendor", "dist", ".pub-cache",
+SKIP_PARTS = {".git", "node_modules", "vendor", "dist", "bin", ".pub-cache",
               ".pub", ".symlinks", "build", ".dart_tool", ".gradle",
               ".idea", ".vscode"}
 
