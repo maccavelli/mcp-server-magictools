@@ -44,6 +44,7 @@ This tree holds three kinds of document:
 | 0014 | REPORT | [0014-REPORT-mcp-tool-schema-and-description-adherence.md](reports/0014-REPORT-mcp-tool-schema-and-description-adherence.md) | complete |
 | 0015 | MADR | [0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md](decisions/0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md) | accepted |
 | 0015 | PLAN | [0015-PLAN-annotate-own-tools-with-behaviour-hints.md](decisions/0015-PLAN-annotate-own-tools-with-behaviour-hints.md) | implemented |
+| 0015 | PLAN | [0015-PLAN-express-handler-constraints-as-schema-keywords.md](decisions/0015-PLAN-express-handler-constraints-as-schema-keywords.md) | proposed |
 
 ## I want to…
 
