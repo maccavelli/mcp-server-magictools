@@ -95,7 +95,7 @@ File: `internal/handler/inventory.go`. Add the `$schema` keyword to all 18 `inpu
 No other change.
 
 Gate: P1 green; existing suite green (the proxy firewall's compile/validate path included);
-`go vet`; `gofmt`. Commit.
+`make vet`; `gofmt`. Commit.
 
 ### P3 — plants and gates
 
@@ -107,10 +107,11 @@ Gate: P1 green; existing suite green (the proxy firewall's compile/validate path
 | one entry's URI given a trailing `#` | `TestInventorySchemaDraft` |
 | fallback schema loses `$schema` (copy-and-strip in `staticInventory`) | `TestSchemaDraftOnStaticFallback` |
 
-Gates: full suite `-tags magictoolstestseam ./...` on a fleet host or local `run-heavy`;
+Gates: full suite via `make test` on a fleet host or local `run-heavy`;
 `make lint` (local `run-heavy` acceptable per D1/D2's recorded experience; the pre-existing
-`service_lifecycle.go:69` SA4023 is linux-only, record 0012's, out of scope); `go vet`; `gofmt`;
-`check_records.py --check`; markdownlint on this plan.
+`service_lifecycle.go:69` SA4023 is linux-only, record 0012's, out of scope); `make vet`; `gofmt`;
+`make check-records`; `make markdownlint`. Validation runs through the Makefile targets, not raw
+`go` commands; single-package iteration during P1/P2 may use `go test ./onepkg`.
 
 Exit: every plant failed; gates green; execution record updated; commit.
 

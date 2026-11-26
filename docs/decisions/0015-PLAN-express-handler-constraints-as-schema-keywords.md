@@ -199,6 +199,8 @@ commit and push to `main` authorized for this session's phases.
 **Gates:**
 
 - Full suite `-tags magictoolstestseam ./...` on `<windows-host>` via `run-on-host`: exit 0.
+  Re-run as `make test` locally via `run-heavy`: exit 0, 723 top-level passes, 0 failures
+  (gates run through the Makefile targets, not raw `go` commands).
 - `make lint` on `<linux-host>` (WSL Ubuntu-24.04) via `run-on-host --need linux`: exit 2, one
   finding — `service_lifecycle.go:69` SA4023, the pre-existing linux-only issue that belongs to
   record 0012, out of this plan's scope. No finding in this plan's files. (The session note that
@@ -206,9 +208,9 @@ commit and push to `main` authorized for this session's phases.
   `$HOME/go/bin/golangci-lint`.)
 - `make lint` locally via `run-heavy`: 0 issues (the SA4023 does not reproduce on darwin),
   matching D1's recorded gate evidence.
-- `TestInventoryConstraints` re-run at HEAD: PASS (5/5 subtests). `go vet ./...`: clean.
-  `gofmt -l` on both changed files: clean. `check_records.py --check`: exit 0.
-  `markdownlint-cli2`: 0 issues.
+- `TestInventoryConstraints` re-run at HEAD: PASS (5/5 subtests). `make vet`: clean.
+  `gofmt -l` on both changed files: clean. `make check-records` (`--check-all`): exit 0.
+  `make markdownlint`: 0 issues.
 
 **Completion criteria:** all four met — keywords equal the measured handler values, the enum is
 exactly the 14-key set, `options` described and per-key rules documented, every plant failed and
