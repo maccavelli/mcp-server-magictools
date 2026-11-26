@@ -472,4 +472,20 @@ reject only transitions PLANNED — ruling needed), and `OverwriteForTest` expor
    carry no exported write without a transition rule. The `make build`/`install` path (tags `netgo`)
    does not include it; `go test` runs with the tag.
 
+### Owner rulings implemented — 2026-11-25 (commit `77d08ac`)
+
+1. **Interrupted-run discard:** `Reject` now takes the caller's instance nonce; a RUNNING session
+   claimed by another instance transitions to REJECTED, a same-instance RUNNING session still refuses
+   `session_running`. The continue-vs-reject race test aligns both callers to one instance nonce (as
+   production does); new `TestPipelineSessionStore_RejectInterruptedRun` covers both cases.
+2. **Build-tagged seam:** `OverwriteForTest` moved to `internal/db/pipeline_session_testseam.go`
+   (`//go:build magictoolstestseam`); the handler test helpers moved to
+   `internal/handler/execute_pipeline_session_testseam.go`; the two test files that use them carry the
+   tag; `make test` runs with `-tags magictoolstestseam`. Verified: `go build ./...` and
+   `go doc PipelineSessionStore.OverwriteForTest` show no seam in production; untagged
+   `go test ./internal/handler/` still passes (the seam tests are excluded without the tag).
+
+Gates after the rulings: full suite `-tags magictoolstestseam ./...` green on the linux fleet host;
+race gate on handler+db green on the windows fleet host; `go vet` clean both with and without the tag.
+
 No later phase has run yet.
