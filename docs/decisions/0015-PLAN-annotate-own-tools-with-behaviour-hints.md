@@ -1,6 +1,6 @@
 ---
-status: in-progress
-date: 2026-11-25
+status: implemented
+date: 2026-11-26
 associated-madr: "0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md"
 ---
 # Annotate every own tool with behaviour hints
@@ -265,4 +265,4 @@ Owner: "accept the madr, plan approved to proceed". MADR already `accepted`; PLA
 **Completion criteria:** all five met — D1 values pinned in the inventory, both emission paths pinned,
 sanitiser passthrough pinned, every plant failed, no handler behaviour changed (existing tests green).
 
-PLAN status: `implemented` pending the owner's acceptance of the execution record.
+PLAN status: `implemented` — owner accepted the execution 2026-11-26 ("1 approved").
