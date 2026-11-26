@@ -27,10 +27,11 @@ import (
 
 // InternalTool represents an internal tool with metadata like category
 type InternalTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-	Category    string `json:"category,omitempty,omitzero"`
-	InputSchema any    `json:"inputSchema"`
+	Name        string               `json:"name"`
+	Description string               `json:"description"`
+	Category    string               `json:"category,omitempty,omitzero"`
+	InputSchema any                  `json:"inputSchema"`
+	Annotations *mcp.ToolAnnotations `json:"annotations,omitempty"`
 }
 
 // OrchestratorHandler handles magictools logic
@@ -241,6 +242,7 @@ func (h *OrchestratorHandler) addTool(s *mcp.Server, t *mcp.Tool, handler mcp.To
 				Name:        it.Name,
 				Description: it.Description,
 				InputSchema: it.InputSchema,
+				Annotations: it.Annotations,
 			}
 			break
 		}

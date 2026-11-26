@@ -96,6 +96,7 @@ func (l *listToolsLayers) staticInventory() []*mcp.Tool {
 			Name:        it.Name,
 			Description: it.Description,
 			InputSchema: it.InputSchema,
+			Annotations: it.Annotations,
 		})
 	}
 	return tools
