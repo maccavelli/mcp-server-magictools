@@ -1,5 +1,5 @@
 ---
-status: complete
+status: implemented
 date: 2026-11-25
 associated-madr: "0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md"
 ---
@@ -497,4 +497,4 @@ the claude provider completes model calls. Acceptance criterion 8 met (owner-rep
 **Close-out:** every acceptance criterion met — contract table green, zero-call proofs, atomic claim,
 all-three and target+intent forms working, flat schema on the wire, fixed disclosure, plants caught,
 gates green, independent review closed with both owner rulings implemented, live step passed. PLAN
-status `complete`.
+status `implemented`.
