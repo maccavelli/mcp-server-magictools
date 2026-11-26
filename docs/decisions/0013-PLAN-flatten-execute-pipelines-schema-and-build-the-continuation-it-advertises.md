@@ -399,8 +399,36 @@ and TTL-bound; an old binary ignores them. No migration either way.
 - Windows-host lint attempt failed on a host toolchain path issue (`C:Usersmacsmgo/bin/golangci-lint`
   not found on <windows-host>); re-run pinned to linux. Host gap, not a code finding.
 
-**Independent review (2026-11-25, pass 1):** a self-review of the full diff against 0005's D2 safety
-properties found and fixed two gaps before close-out (commit `5855a94`):
+**Independent review (2026-11-25, pass 2 — separate reviewer):** dispatched the `code-reviewer`
+agent persona to a second model (gobble on grok-4.7, read-only) over `184370e..HEAD`. Verdict:
+**PASS WITH NOTES** — 0 critical, 2 important, 2 minor. It verified in source: flat schema (seven
+optional properties, no union); `ClaimRunning`/`Reject` read+write in one `UpdateWithRetryCtx`
+transaction; reject calls only `ps.Reject`, no ProxyService; pre-flight completes before
+`freshPipelineExecute`; mutator checkpoint/rollback unchanged; 128-bit ids; disclosure matches
+0005 Decided 9. Findings:
+
+- **Important (92):** `execute_pipeline_session.go:195` — plan_hash mismatch / plan_stale handled
+  after `ClaimRunning` commits RUNNING; a failed `Fail` write is logged and ignored, leaving the
+  session stuck RUNNING (next continue gets `session_running`, reject also refused until expiry).
+  Fix: check hash and resolve before the claim. **Fixed** (see pass 3).
+- **Important (93):** `pipeline_session_store_test.go:205` — handler refusal tests cover only
+  unknown_session, session_rejected, plan_hash_mismatch, plan_stale; the state table requires handler
+  tests for session_running, session_already_run (with URIs), session_failed, session_interrupted,
+  expired_session. **Fixed** (see pass 3).
+- **Minor (94):** `countPipelineStepForTest` only in `freshRunSingleStep`, not the post-loop mutator
+  path; a zero-call assertion would miss that loop. **Fixed.**
+- **Minor (88):** `DisallowUnknownFields` then `Decode` without `dec.More()`; a trailing second JSON
+  value is ignored. **Fixed.**
+- **Open question:** reject of an interrupted RUNNING row returns `session_running` (Reject does not
+  read the instance nonce). Is discard of an interrupted run meant to be impossible until expiry?
+  Left as-is (reject only transitions PLANNED); owner to rule.
+- **Open question:** `resultStatusOf` substring-matches `"status": "COMPLETED"`; a failed envelope
+  whose step error contains that substring would be stored COMPLETED. No producer found. **Hardened**
+  to parse the envelope metadata instead of substring.
+- **Recommendation:** `OverwriteForTest` is exported (PLANNED-restricted after pass 1). Keep test-only
+  if the "no exported write without a transition rule" rule stands. Owner to rule.
+
+**Pass 1 (self-review, 2026-11-25):** found and fixed two gaps (commit `5855a94`):
 
 1. `OverwriteForTest` could rewrite any stored state, violating P3's "no exported way to write a state
    without its transition rule". Now refuses any supplied or stored status other than PLANNED.
@@ -416,5 +444,23 @@ server-issued ids; cap, expiry, tombstones, instance nonce all tested.
 **Not covered by this review:** an independent reviewer with no stake in the draft (the plan's P7 step 3
 asks for one; this pass was the implementing agent's own review). Recorded as a gap for the owner to
 assign or accept.
+
+**Pass 3 (2026-11-25, review fixes, commit `13768c5`):** all four actionable findings fixed:
+
+- Plan-hash and pre-flight checks moved **before** `ClaimRunning` — a refusal leaves the session
+  PLANNED, never stuck RUNNING. New test `TestExecutePipelineContinuation_RefusalLeavesPlanned`
+  proves the session stays PLANNED and can still be rejected.
+- Handler refusal tests extended to every state-table row: `session_running`, `session_already_run`
+  (asserting the stored artifact URIs are quoted), `session_failed`, `session_interrupted`,
+  `expired_session` — each with a zero-call assertion.
+- `countPipelineStepForTest` added to the post-loop mutator path.
+- `dec.More()` check after decode refuses a trailing second JSON value.
+- `resultStatusOf` parses the envelope metadata as JSON instead of substring-matching (the review's
+  open question; hardened).
+
+Race gate re-run after the fixes: `internal/handler` + `internal/db` green (`-race -timeout 20m`,
+fleet host). Left for the owner: reject of an interrupted RUNNING row (returns `session_running`;
+reject only transitions PLANNED — ruling needed), and `OverwriteForTest` exported-but-PLANNED-restricted
+(the "no exported write without a transition rule" wording vs a test seam — ruling needed).
 
 No later phase has run yet.
