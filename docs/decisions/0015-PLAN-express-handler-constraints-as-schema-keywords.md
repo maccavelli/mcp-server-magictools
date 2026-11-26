@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 date: 2026-11-26
 associated-madr: "0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md"
 ---
@@ -216,4 +216,5 @@ commit and push to `main` authorized for this session's phases.
 exactly the 14-key set, `options` described and per-key rules documented, every plant failed and
 gates green with no handler behaviour change.
 
-PLAN remains `in-progress` pending owner acceptance of the execution.
+PLAN status: `implemented` — owner accepted the execution 2026-11-26 ("accept d2, approval to
+proceed").
