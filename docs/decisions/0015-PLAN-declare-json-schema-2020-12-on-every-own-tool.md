@@ -141,3 +141,61 @@ the standard's 2020-12 default — the same semantics, less explicit. No stored 
 Owner: "accept d2, approval to proceed." D2 accepted; D3 and D4 approved. PLAN `in-progress`;
 commit and push to `main` authorized for this session (standing from the D2 approval turn).
 D3 executes first; this plan follows.
+
+### P0 — 2026-11-26, re-grounded at `be224de` (pass 1)
+
+- Inventory: 18 `"name":` entries, 18 `"inputSchema": {` objects, 0 `"$schema"` keywords.
+- Sanitiser key set confirmed (`schema_util.go:39-64`): `type`/`properties` only.
+- Proxy firewall compiler confirmed (`proxy_service.go:94`).
+- D1/D3 helpers confirmed reusable: `newTestHandler`, `emittedToolsList`, `schemaMap`
+  (`pipeline_session_store_test.go:54`), `d3Titles` as the own-tool name set.
+- No deviation.
+
+### P1 — 2026-11-26, tests first (pass 1)
+
+- `internal/handler/inventory_schema_draft_test.go`: `TestInventorySchemaDraft` pins the exact
+  2020-12 URI on all 18 entries.
+- `internal/handler/schema_draft_wire_test.go` (behind `magictoolstestseam`):
+  `TestSchemaDraftOnWire` (17 own schemas on the wire; `get_internal_logs` pinned
+  `$schema`-free per S5), `TestSchemaDraftOnStaticFallback` (all 18).
+- Seen red: `inputSchema has no $schema` (inventory), `wire schema has no $schema` (wire) —
+  the stated reasons.
+
+### P2 — 2026-11-26, inventory edits (pass 1)
+
+- All 18 `inputSchema` objects gain
+  `"$schema": "https://json-schema.org/draft/2020-12/schema"`. No other change.
+- All three P1 tests green; D1/D2/D3 guards and the 0013 flat-schema guard still green.
+- `gofmt` clean; `make vet` clean.
+
+### P3 — 2026-11-26, plants and gates (pass 1)
+
+**Plants (scratch copy of `git archive HEAD` plus the P1/P2 working files, each seen to fail):**
+
+| Plant | Test that failed | First failure line |
+| :--- | :--- | :--- |
+| first entry's `$schema` removed | `TestInventorySchemaDraft` | `sync_servers: inputSchema has no $schema` |
+| first entry's URI changed to draft-07 | `TestInventorySchemaDraft` | `sync_servers: $schema = http://json-schema.org/draft-07/schema#, want "https://…"` |
+| sanitiser strips `$schema` | `TestSchemaDraftOnWire` | `align_tools: wire schema has no $schema (sanitiser stripped it?)` |
+| first entry's URI given trailing `#` | `TestInventorySchemaDraft` | `sync_servers: $schema = https://…/schema#, want "https://…/schema"` |
+| fallback copies schema and strips `$schema` | `TestSchemaDraftOnStaticFallback` | `sync_servers: fallback $schema = <nil>, want "https://…"` |
+
+Deviation note: the plan's plant table names specific tools ("one entry"); the runs planted on
+the first entry (`sync_servers`) for plants 1/2/4 — same assertion, same test, no scope change.
+
+**Gates:**
+
+- `make test` on `<windows-host>` via `run-on-host --need any`: exit 0, 716 top-level passes,
+  0 failures; all three D4 tests PASS.
+- `make lint` on `<linux-host>` (WSL Ubuntu-24.04) via `run-on-host --need linux`: exit 2, one
+  finding — the pre-existing `service_lifecycle.go:69` SA4023 (record 0012's, linux-only, out of
+  scope). No finding in this plan's files. D2's local `run-heavy` lint on the same toolchain
+  recorded 0 issues; the local queue was busy with other sessions' gates during this phase.
+- `make vet`: clean. `gofmt -l internal/handler/`: clean. `make check-records`: exit 0.
+  `make markdownlint`: 0 issues.
+
+**Completion criteria:** all three met — the exact 2020-12 URI pinned on all 18 inventory
+schemas, both emission paths pinned (wire test doubles as the sanitiser-passthrough proof),
+every plant failed and gates green with no handler behaviour change.
+
+PLAN remains `in-progress` pending owner acceptance of the execution.
