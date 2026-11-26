@@ -40,7 +40,7 @@ This tree holds three kinds of document:
 | 0012 | MADR | [0012-MADR-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md](decisions/0012-MADR-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md) | accepted |
 | 0012 | PLAN | [0012-PLAN-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md](decisions/0012-PLAN-make-the-per-user-launchagent-lifecycle-correct-restartable-and-verifiable.md) | implemented |
 | 0013 | MADR | [0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](decisions/0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md) | accepted |
-| 0013 | PLAN | [0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](decisions/0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md) | in-progress |
+| 0013 | PLAN | [0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](decisions/0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md) | complete |
 | 0014 | REPORT | [0014-REPORT-mcp-tool-schema-and-description-adherence.md](reports/0014-REPORT-mcp-tool-schema-and-description-adherence.md) | complete |
 | 0015 | MADR | [0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md](decisions/0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md) | proposed |
 

@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: complete
 date: 2026-11-25
 associated-madr: "0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md"
 ---
@@ -488,4 +488,13 @@ reject only transitions PLANNED — ruling needed), and `OverwriteForTest` expor
 Gates after the rulings: full suite `-tags magictoolstestseam ./...` green on the linux fleet host;
 race gate on handler+db green on the windows fleet host; `go vet` clean both with and without the tag.
 
-No later phase has run yet.
+### P8 — 2026-11-25, owner's live step: PASSED
+
+The owner rebuilt, installed and restarted the service, and reported: "gobble works now with claude
+models tests passed". The Anthropic `tools.16.custom.input_schema` refusal is gone on the live route;
+the claude provider completes model calls. Acceptance criterion 8 met (owner-reported).
+
+**Close-out:** every acceptance criterion met — contract table green, zero-call proofs, atomic claim,
+all-three and target+intent forms working, flat schema on the wire, fixed disclosure, plants caught,
+gates green, independent review closed with both owner rulings implemented, live step passed. PLAN
+status `complete`.
