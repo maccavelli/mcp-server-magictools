@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 date: 2026-11-26
 associated-madr: "0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md"
 ---
@@ -198,4 +198,4 @@ the first entry (`sync_servers`) for plants 1/2/4 — same assertion, same test,
 schemas, both emission paths pinned (wire test doubles as the sanitiser-passthrough proof),
 every plant failed and gates green with no handler behaviour change.
 
-PLAN remains `in-progress` pending owner acceptance of the execution.
+PLAN status: `implemented` — owner accepted the execution 2026-11-26 ("accepted, d3 and d4").

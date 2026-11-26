@@ -1,5 +1,5 @@
 ---
-status: in-progress
+status: implemented
 date: 2026-11-26
 associated-madr: "0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md"
 ---
@@ -206,4 +206,32 @@ Scratch copies cleaned up after the runs.
 **Completion criteria:** all three met — 18 titles pinned in the inventory, both emission paths
 pinned, every plant failed and gates green with no handler behaviour change.
 
-PLAN remains `in-progress` pending owner acceptance of the execution.
+PLAN status: `implemented` — owner accepted the execution 2026-11-26 ("accepted, d3 and d4").
+
+### Close-out review — 2026-11-26
+
+Owner asked for a code review and a gap check across the plans. Verified at `b6c8112`:
+
+- Diff `c5dca3d..b6c8112` reviewed: production changes are exactly the two mapping lines
+  (`Title` in `addTool` and `staticInventory`), the `InternalTool.Title` field, and the
+  inventory literals (titles, constraint keywords, 14-key enum, `$schema`). No handler logic
+  touched.
+- Inventory parsed independently: 18 tools, all with title, annotations, exact 2020-12 URI,
+  root `type: object`, `additionalProperties: false`, no root unions, all property descriptions
+  present; enum exactly the 14-key set; keyword values match the honesty table.
+- All inventory consumers audited: `SyncNativeTools` (unmarshals into `mcp.Tool` — picks up
+  title/annotations automatically), `alignCollectInternalMatches` / `alignTryInternalExactMatch`
+  (name/description/category only — unchanged), `listToolsInfoDefaultInventory` (unmarshals into
+  `db.ToolRecord`, ignores unknown keys — unchanged), `OnConfigReloaded` (re-parses the same
+  JSON — new fields ride along), hydrator payload (name/description/category/server — unchanged).
+- `hashSchema` (`internal/client/sync_helpers.go:25-35`) hashes name/description/inputSchema:
+  the `$schema` keyword changes native tools' schema hashes, so the first sync after deployment
+  re-indexes them once — expected, benign.
+- MADR Confirmation items all pinned: guard tests (annotations, constraints, titles, draft),
+  wire + fallback emission tests, sanitiser passthrough (annotations test + draft wire test),
+  plants per plan, records gates.
+- Final `make test` on `<linux-host>` via `run-on-host --need any`: exit 0, 727 top-level
+  passes, 0 failures — linux coverage in addition to the earlier windows runs.
+- `make vet`, `make check-records`, `make markdownlint`: clean.
+
+No gaps found. All four plans under this MADR are `implemented`.
