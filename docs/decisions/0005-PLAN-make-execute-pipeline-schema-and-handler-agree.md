@@ -1,6 +1,6 @@
 ---
-status: in-progress
-date: 2026-11-26
+status: implemented
+date: 2026-11-27
 associated-madr: "0005-MADR-make-execute-pipeline-schema-and-handler-agree.md"
 ---
 
@@ -94,9 +94,56 @@ Plants, each in a scratch copy, then the scratch deleted. The working tree was n
 | untyped property given `type: object` | `TestSanitizeToolSchema_D31Table/untyped_property_stays_untyped` | `got ... "type":"object" ... want` the description-only node |
 | root union given `type` and `properties` | `TestSanitizeToolSchema_D31Table/root_union_is_unchanged` | `got` a root with `type` and `properties`, `want` the union alone |
 
-The continuation plants were already recorded by [0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md). They were not repeated. The independent review was not dispatched: the author of the change is not that reviewer. P9 was not run.
+The continuation plants were already recorded by [0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md). They were not repeated. P9 was not run by an agent; the owner confirmed it on 2026-11-27.
 
-Status stays `in-progress`. The agent's code phases are done. The owner's live install, restart, and sync are not, and this record does not pretend they are.
+### Independent review — 2026-11-27
+
+A new gobble instance, started with `--no-session` and not this session, read `34bf269..f539892` and the MADR's D3 table and amendment (a). It was not given the implementation reasoning. It edited nothing. It did not run the tests.
+
+| Item | Result |
+| :--- | :--- |
+| 1–6 reject paths, claim atomicity, session id, stored-plan contents, pre-flight, refusals | not in this diff. The reviewer did not open the continuation code. |
+| 7 all-three call | not in this diff. Absence of a dispatch change is not a verified pass. |
+| 8 served schema | not in this diff. |
+| 9 sanitiser table | pass, from `internal/util/schema_util.go` |
+| 10 Go-binary lookup | pass, from `internal/handler/go_binary.go`. Windows behaviour was not run. |
+
+Closed: 9 and 10, subject to the tests, which this reviewer did not run. The push gate had already run those tests.
+
+Put to the owner:
+
+1. Items 1–8 are [0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md), not `f539892`. That plan records its own review. This review does not re-verify them.
+2. D3.2 is still the default: nested `properties: {}` kept, because no provider probe was run.
+3. D3.3's live refresh was not verified against a live store. The test is `internal/client/sync_schema_refresh_test.go`.
+
+The plan status is `implemented`, on the owner's P9 confirmation the same day. This review does not reopen it. It closes items 9 and 10 only.
+
+### P9 execution — 2026-11-27
+
+The owner confirmed P9 complete. No agent ran a build, install, restart, re-sync, or call against the owner's server. The individual live checks in the list above were not reported, so this record does not claim which of them were seen.
+
+The plan's close-out word is `complete`. This repository's record check does not accept that word. The status is `implemented`, which is the checker's word for a plan whose owner has confirmed the live step.
+
+Still named, and not closed by this confirmation: the independent review in P8 step 3 had not been dispatched yet. It was dispatched later the same day; its result is the section above. The continuation plants remain 0013's. A tag or release was not asked for.
+
+### D3.2 probe and D3.3 live read — 2026-11-27
+
+The owner ordered the probe and the live read after the review above. The probe used the login shell's environment keys and printed only route, case, HTTP status, and the error `code`. No header, body, or key was printed. Models are the ones record 0084 already used, except Kilo, which used `anthropic/claude-haiku-5.5`.
+
+Evidence (1), re-checked at go-llmprovider-sdk `223bb8d`: the recorded schema refusals in `testdata/refusals-0061` and `testdata/refusals-0062` are a root `type: string`, not a missing `properties` field. Evidence (2), the upstream comments, was not re-read this pass.
+
+| Route | nested without `properties` | nested with `properties: {}` | root without `properties` |
+| :--- | :--- | :--- | :--- |
+| grok responses `grok-4.6` | 200 | 200 | 200 |
+| openai responses `gpt-6-luna` | 200 | 200 | 200 |
+| claude messages `claude-sonnet-5` | 200 | 200 | 200 |
+| opencode zen responses `gpt-5.5` | 200 | 200 | 200 |
+| gemini interactions `gemini-3.8-flash` | 200 | 200 | 200 |
+| kilo chat `anthropic/claude-haiku-5.5` | 401 `INVALID_TOKEN` | 401 `INVALID_TOKEN` | 401 `INVALID_TOKEN` |
+
+Together and Hugging Face had keys set and were not sent. OpenCode's other routes were not sent. Kilo's 401 is an auth failure, not a schema refusal and not an acceptance. Case (i) was therefore not accepted on every route the owner has a key for. D3.2's rule does not remove nested `properties: {}`. They stay.
+
+The live read did not start a binary and did not call `sync_servers`. It called `list_tools` on the already running service at `127.0.0.1:48080`, `max_tools` 49. Result: 29 tool headings, 0 old-form properties (type object, empty `properties`, and a description, and nothing else), 0 empty `properties: {}` on an object. A filesystem copy of the live database was torn and is not the evidence; after truncating that copy's memtable only, it agreed: 47 tools, 29 proxied, the same two zeros, newest `LastSyncedAt` `2026-11-27T14:00:40Z`, which is after `f539892` (`2026-11-26T22:17:58-06:00`). This shows the current store does not hold the old fingerprint. It does not show a before-and-after sync.
 
 ## Approval
 
@@ -376,6 +423,8 @@ this
 Exit: every plant failed as named; every gate green with output kept; the review's findings closed.
 
 ### P9 — the owner's live step and close-out
+
+**Done, by the owner's confirmation on 2026-11-27 ("p9 complete").** The steps below were not observed by an agent. The confirmation is the close-out this phase names. The checklist results were not pasted back, so they are not invented here.
 
 Mainstream, low (the owner's steps; the record update is the agent's). **P9 is the owner's alone**, outside the
 approval above. Nothing here is run by an agent: no build, no install, no restart, no re-sync, no call to the owner's

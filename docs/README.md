@@ -24,7 +24,7 @@ This tree holds three kinds of document:
 | 0004 | MADR | [0004-MADR-a-parse-error-must-not-replace-the-operators-server-registry.md](decisions/0004-MADR-a-parse-error-must-not-replace-the-operators-server-registry.md) | proposed |
 | 0004 | PLAN | [0004-PLAN-a-parse-error-must-not-replace-the-operators-server-registry.md](decisions/0004-PLAN-a-parse-error-must-not-replace-the-operators-server-registry.md) | implemented |
 | 0005 | MADR | [0005-MADR-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-MADR-make-execute-pipeline-schema-and-handler-agree.md) | accepted |
-| 0005 | PLAN | [0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md) | in-progress |
+| 0005 | PLAN | [0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md) | implemented |
 | 0006 | MADR | [0006-MADR-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md](decisions/0006-MADR-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md) | accepted |
 | 0006 | PLAN | [0006-PLAN-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md](decisions/0006-PLAN-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md) | implemented |
 | 0007 | MADR | [0007-MADR-install-the-fleet-agent-workspace.md](decisions/0007-MADR-install-the-fleet-agent-workspace.md) | accepted |
@@ -47,13 +47,15 @@ This tree holds three kinds of document:
 | 0015 | PLAN | [0015-PLAN-declare-json-schema-2020-12-on-every-own-tool.md](decisions/0015-PLAN-declare-json-schema-2020-12-on-every-own-tool.md) | implemented |
 | 0015 | PLAN | [0015-PLAN-express-handler-constraints-as-schema-keywords.md](decisions/0015-PLAN-express-handler-constraints-as-schema-keywords.md) | implemented |
 | 0015 | PLAN | [0015-PLAN-give-every-own-tool-a-human-readable-title.md](decisions/0015-PLAN-give-every-own-tool-a-human-readable-title.md) | implemented |
+| 0016 | MADR | [0016-MADR-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md](decisions/0016-MADR-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md) | accepted |
+| 0016 | PLAN | [0016-PLAN-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md](decisions/0016-PLAN-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md) | implemented |
 
 ## I want to…
 
 | I want to… | Start here |
 | :--- | :--- |
 | understand how this fits together | [architecture.md](architecture.md) |
-| know what is left of the pipeline contract | [0005-MADR-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-MADR-make-execute-pipeline-schema-and-handler-agree.md) — continuation, session store, and the sanitiser table have landed; the Go-binary lookup has not |
+| know why execute_pipeline and the sanitiser look like this | [0005-MADR-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-MADR-make-execute-pipeline-schema-and-handler-agree.md) |
 | know the rules agents follow in this repository | [CLAUDE.md](../CLAUDE.md) |
 | know why the repository has the files and gates it has | [0007-MADR-install-the-fleet-agent-workspace.md](decisions/0007-MADR-install-the-fleet-agent-workspace.md) |
 | install or upgrade the binary | [Platform installation](guides/platform-installation.md) |
