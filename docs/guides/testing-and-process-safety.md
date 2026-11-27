@@ -39,9 +39,11 @@ with the live service: running a built binary of this module** (see "Still not s
 - **The registry's own children** (S3) are ended through their own handles and never once their exit has been
   collected, so a reused pid is never signalled.
 - **The start-up sweep** (S5, `InitialProcessSweep`) is removed; the reaper at start-up is the one sweep.
-- **The pid-file cleanup** (`cleanupStaleProcess`, run by `db.NewStore`) is **unchanged**. It reads `server.pid` in the
-  store directory and sends SIGTERM, then SIGKILL, to that pid if it is alive, without checking that the pid is a
-  magictools process. Its identity check is the next record.
+- **The pid-file cleanup** (`cleanupStaleProcess`, run by `db.NewStore`) does not signal a process that holds
+  `LOCK.magic`, the caller, or a live pid whose executable is not this binary or cannot be read
+  ([0016](../decisions/0016-MADR-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md)). A matching executable
+  that does not hold the lock is still signalled. The installed service is unprotected until it is rebuilt with this
+  check.
 
 Every sub-server keeps `MCP_ORCHESTRATOR_OWNED=true`: the sub-servers read it themselves to know they are orchestrated.
 An old binary therefore still matches a new binary's children, and can reap them, until no old binary runs.
@@ -53,7 +55,7 @@ An old binary therefore still matches a new binary's children, and can reap them
 | S1 | the orphan reaper, `PruneOrphans` | tests in `internal/client`, over a fake process table only | no test reaches a real process |
 | S2 | the single-instance enforcer | `internal/client` tests over the fake; `internal/client` and `internal/handler` tests that connect a server use a registry without a table, which scans nothing | no test reaches a real process |
 | S3 | the registry ends a child it started | the same connect and disconnect tests, and `internal/client` tests of S3 itself, each ending only its own child | its own child, through its handle |
-| S4 | the pid-file cleanup | every `db.NewStore` call, on a fresh temporary directory | unchanged in the product (no identity check; the next record). Its two test edges are closed: the stale-pid test records the pid of a child it started and reaped, and the debug harness is built only with `-tags debuglive` |
+| S4 | the pid-file cleanup | every `db.NewStore` call, on a fresh temporary directory | 0016: a lock holder and a foreign or unreadable executable are not signalled. The installed service is unprotected until rebuilt. The stale-pid test records a reaped child, and the debug harness is built only with `-tags debuglive` |
 | S5 | the start-up sweep | none | removed |
 | S6 to S8 | service control and the updater | none | unchanged |
 
@@ -74,8 +76,8 @@ one package or all of them. By the guard's showing:
 **Still not safe**, after this record too:
 
 - **Running a built binary of this module beside the live service** (`make run`, `serve`, a bare run, `go run`) with
-  the default database path. The pid-file cleanup (S4) terminates whatever holds the recorded pid, which is the live
-  service. The next record adds its identity check.
+  the default database path, until the owner rebuilds the installed service with 0016. The binary that is running now
+  still terminates whatever pid `server.pid` names.
 - **The debug harness `TestDebugLiveBadger`** (`internal/db/check_badger_test.go`). It is built only with
   `-tags debuglive`, so a normal `go test` does not compile it. It opens the directory named by `MAGICTOOLS_DEBUG_DB`
   through `NewStore`, which runs the pid-file cleanup (S4) first: pointed at a live service's directory it stops the

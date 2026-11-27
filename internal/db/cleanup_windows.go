@@ -6,11 +6,13 @@ package db
 import (
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 
+	"github.com/shirou/gopsutil/v4/process"
 	"golang.org/x/sys/windows"
 )
 
@@ -44,26 +46,64 @@ func releaseOSLock(f *os.File) error {
 	return windows.UnlockFileEx(h, 0, 1, 0, &overlapped)
 }
 
+// storeLockHeld reports whether another process holds LOCK.magic.
+// A lock this process acquires during the probe is released. A probe that
+// cannot be made is treated as held, so the caller does not signal.
+func storeLockHeld(path string) bool {
+	f, err := os.Open(filepath.Join(path, "LOCK.magic"))
+	if err != nil {
+		return !os.IsNotExist(err)
+	}
+	defer f.Close()
+	h := windows.Handle(f.Fd())
+	var overlapped windows.Overlapped
+	err = windows.LockFileEx(h, windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped)
+	if err != nil {
+		return true
+	}
+	_ = windows.UnlockFileEx(h, 0, 1, 0, &overlapped)
+	return false
+}
+
 func cleanupStaleProcess(path string) error {
 	pidFile := filepath.Join(path, "server.pid")
-	data, err := os.ReadFile(pidFile)
+	data, err := os.ReadFile(pidFile) //nolint:gosec // pid path is under the store directory
 	if err != nil {
 		return nil
 	}
 
-	pid, err := strconv.Atoi(string(data))
+	rec, ok := parsePIDFile(data)
+	if !ok {
+		return nil
+	}
+
+	selfExe, err := selfExecutable()
 	if err != nil {
-		return nil // Ignore corrupt pid file natively
+		selfExe = ""
+	}
+	alive, exe, exeErr := false, "", error(nil)
+	if rec.PID <= math.MaxInt32 {
+		if found, err := process.NewProcess(int32(rec.PID)); err == nil { //nolint:gosec // range checked above
+			running, runErr := found.IsRunning()
+			alive = runErr == nil && running
+			if alive {
+				exe, exeErr = lookupExecutable(rec.PID)
+			}
+		}
+	}
+	switch decideCleanup(rec.PID, os.Getpid(), storeLockHeld(path), alive, exe, selfExe, exeErr) {
+	case cleanupLeave:
+		return nil
+	case cleanupRemove:
+		return removePIDFile(pidFile)
+	default:
 	}
 
-	// Taskkill explicitly forcefully shutting down previous orchestrator trees on Windows perfectly
-	killCmd := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid))
+	// Alive, not us, lock not held, executable matches. /PID, not a tree kill.
+	killCmd := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(rec.PID))
 	if err := killCmd.Run(); err == nil {
-		slog.Warn("Stale Windows instance detected and killed", "pid", pid)
+		slog.Warn("Stale Windows instance detected and killed", "pid", rec.PID)
 	}
 
-	if err := os.Remove(pidFile); err != nil && !os.IsNotExist(err) {
-		slog.Warn("Failed to remove PID file", "path", pidFile, "error", err)
-	}
-	return nil
+	return removePIDFile(pidFile)
 }

@@ -524,7 +524,7 @@ func NewStore(path string, limitOpts ...int) (*Store, error) {
 	}
 
 	pidPath := filepath.Join(path, "server.pid")
-	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+	if err := writePIDFile(path); err != nil {
 		slog.Warn("Failed to write PID file", "error", err)
 	}
 

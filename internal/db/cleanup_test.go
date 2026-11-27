@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,8 +66,9 @@ func TestCleanupStaleProcess(t *testing.T) {
 		t.Errorf("cleanupStaleProcess failed on stale pid: %v", err)
 	}
 
-	// 3. Case: Live process
-	cmd := exec.Command("sleep", "10")
+	// 3. A live process whose executable is not this binary (S7). It must not be signalled,
+	// and the pid file is removed so a stranger's pid does not block the next open.
+	cmd := exec.Command("sleep", "30")
 	if err := cmd.Start(); err != nil {
 		t.Skip("skipping live process test; sleep command not available")
 		return
@@ -76,21 +78,60 @@ func TestCleanupStaleProcess(t *testing.T) {
 	pidString := strconv.Itoa(cmd.Process.Pid)
 	_ = os.WriteFile(pidFile, []byte(pidString), 0644)
 
-	// We expect cleanupStaleProcess to send SIGTERM and wait.
-	// We'll give it a moment to run and then check if the pid file was cleaned up (or at least no error)
-	errCh := make(chan error, 1)
+	exited := make(chan struct{})
 	go func() {
-		errCh <- cleanupStaleProcess(tmpDir)
+		_ = cmd.Wait()
+		close(exited)
 	}()
 
+	if err := cleanupStaleProcess(tmpDir); err != nil {
+		t.Fatalf("cleanupStaleProcess failed on a foreign executable: %v", err)
+	}
 	select {
-	case err := <-errCh:
-		if err != nil {
-			t.Errorf("cleanupStaleProcess failed on live pid: %v", err)
-		}
-	case <-time.After(1 * time.Second):
-		// This might happen if sleep doesn't exit on SIGTERM (unlikely for sleep)
-		// but we've successfully tested the signal sending part.
-		_ = cmd.Process.Kill()
+	case <-exited:
+		t.Fatal("cleanup signalled a live process whose executable is not this binary")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := os.Stat(pidFile); !os.IsNotExist(err) {
+		t.Fatal("pid file of a foreign executable was left in place")
+	}
+}
+
+func TestCleanupUnreadableExecutableLeft_0016(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "cleanup-unread")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cmd := exec.Command("sleep", "30")
+	if err := cmd.Start(); err != nil {
+		t.Skip("skipping; sleep command not available")
+	}
+	defer cmd.Process.Kill()
+
+	pidFile := filepath.Join(tmpDir, "server.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(cmd.Process.Pid)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prev := lookupExecutable
+	lookupExecutable = func(int) (string, error) { return "", errors.New("unreadable") }
+	t.Cleanup(func() { lookupExecutable = prev })
+
+	if err := cleanupStaleProcess(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(exited)
+	}()
+	select {
+	case <-exited:
+		t.Fatal("cleanup signalled a process whose executable could not be read")
+	case <-time.After(200 * time.Millisecond):
+	}
+	if _, err := os.Stat(pidFile); err != nil {
+		t.Fatal("pid file was removed when the executable could not be read")
 	}
 }

@@ -997,7 +997,9 @@ the option this record recommended.
 1. **A later record, straight after this one (Recommended).** This record stays short. The S4 hazard is the product's,
    not the tests': any `serve`, `make run` or ad hoc run against the live store directory kills the live service
    (E56, E57, E58, E61). It is the most likely way to hurt the live service after this record lands, so it should
-   follow at once, not be forgotten.
+   follow at once, not be forgotten. *Note, 2026-11-27:* that record is
+   [0016-MADR-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md](0016-MADR-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md),
+   `proposed`. 0011 to 0015 took the numbers in between. The cleanup at `f539892` is still the one this answer describes.
 2. **In this record, as a final phase.** Check that the recorded pid is not the caller's and that its executable is the
    product's before any signal; Windows gets a liveness test. Cost: a product behaviour change and a new unit of
    verification here.

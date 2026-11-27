@@ -76,12 +76,17 @@ var defaultAllowlist = slices.Concat(
 		u(primGopsutilNewProc, 2)),
 	group("internal/util/proc_test.go", siteProbe, "the test reads its own process environment", u(funcGetProcessEnviron, 1)),
 
-	// S4: the pid-file cleanup. Its identity check is a later record.
+	// S4: the pid-file cleanup. 0016 refuses a lock holder and a foreign executable.
 	group("internal/db/cleanup_unix.go", "S4", "stale-instance kill of the pid in server.pid",
 		u(primFindProcess, 1), u(primSignal, 5)),
-	group("internal/db/cleanup_windows.go", "S4", "stale-instance kill of the pid in server.pid", u(primCmdTaskkill, 1)),
-	group("internal/db/cleanup_test.go", "S4", "a dead pid and the test's own child only", u(primTestCleanupStale, 3)),
+	group("internal/db/cleanup_windows.go", "S4", "stale-instance kill of a matching executable, after a liveness test",
+		u(primCmdTaskkill, 1), u(primGopsutilNewProc, 1)),
+	group("internal/db/cleanup_identity.go", "S4", "read one pid's executable and this process's start token; no enumeration",
+		u(primGopsutilNewProc, 2)),
+	group("internal/db/cleanup_test.go", "S4", "a dead pid and the test's own children only", u(primTestCleanupStale, 4)),
 	group("internal/db/cleanup_test.go", siteOwnChild, "ends the test's own sleep children", u(primKill, 2)),
+	group("internal/db/cleanup_lock_unix_test.go", siteOwnChild, "re-runs this test binary to hold LOCK.magic, then checks it is alive",
+		u(primTestExecNonLiteral, 1), u(primSignal, 1), u(primKill, 1), u(primTestCleanupStale, 1)),
 
 	// S5, the start-up sweep, was removed in P4b step 8 (the MADR's D6): PreDrive's PruneOrphans is the one sweep.
 
