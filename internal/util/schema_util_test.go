@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -41,11 +42,18 @@ func TestSanitizeToolSchema_SetsDefaultType(t *testing.T) {
 		t.Errorf("Expected root type 'object', got %v", schema["type"])
 	}
 
-	// Check property type
+	// Decided 6 / D3.1: an untyped property stays untyped. The old pin
+	// required type: object here. That was the retyping this record removes.
 	props := schema["properties"].(map[string]any)
 	foo := props["foo"].(map[string]any)
-	if foo["type"] != "object" {
-		t.Errorf("Expected property 'foo' to default to type 'object', got %v", foo["type"])
+	if _, ok := foo["type"]; ok {
+		t.Errorf("untyped property gained type %v; want it left unchanged", foo["type"])
+	}
+	if _, ok := foo["properties"]; ok {
+		t.Error("untyped property gained properties; want it left unchanged")
+	}
+	if foo["description"] != "bar" {
+		t.Errorf("description = %v, want bar", foo["description"])
 	}
 }
 
@@ -70,6 +78,11 @@ func TestSanitizeToolSchema_Raw(t *testing.T) {
 	if m["type"] != "object" {
 		t.Error("expected default type object")
 	}
+	props, _ := m["properties"].(map[string]any)
+	a, _ := props["a"].(map[string]any)
+	if len(a) != 0 {
+		t.Errorf("null property = %#v, want {}", props["a"])
+	}
 }
 
 func TestSanitizeToolSchema_Nil(t *testing.T) {
@@ -81,6 +94,206 @@ func TestSanitizeToolSchema_Nil(t *testing.T) {
 	SanitizeToolSchema(tool)
 	if tool.InputSchema == nil {
 		t.Error("expected InputSchema to be initialized")
+	}
+}
+
+// TestSanitizeToolSchema_D31Table holds 0005's D3.1 table. D3.2's probe was not
+// run, so a nested object with no properties keeps properties: {}.
+func TestSanitizeToolSchema_D31Table(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   map[string]any
+		want map[string]any
+	}{
+		{
+			name: "root without type gains type object",
+			in:   map[string]any{"properties": map[string]any{}},
+			want: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			name: "root without properties gains empty properties",
+			in:   map[string]any{"type": "object"},
+			want: map[string]any{"type": "object", "properties": map[string]any{}},
+		},
+		{
+			name: "untyped property stays untyped",
+			in: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"foo": map[string]any{"description": "bar"},
+				},
+			},
+			want: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"foo": map[string]any{"description": "bar"},
+				},
+			},
+		},
+		{
+			name: "null property becomes empty object",
+			in: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"a": nil,
+				},
+			},
+			want: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"a": map[string]any{},
+				},
+			},
+		},
+		{
+			name: "object property without properties keeps properties empty",
+			in: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"bag": map[string]any{"type": "object"},
+				},
+			},
+			want: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"bag": map[string]any{"type": "object", "properties": map[string]any{}},
+				},
+			},
+		},
+		{
+			name: "object property with properties is recursed",
+			in: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"bag": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"inner": map[string]any{"description": "only"},
+						},
+					},
+				},
+			},
+			want: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"bag": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"inner": map[string]any{"description": "only"},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "items empty object is unchanged",
+			in: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"list": map[string]any{"type": "array", "items": map[string]any{}},
+				},
+			},
+			want: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"list": map[string]any{"type": "array", "items": map[string]any{}},
+				},
+			},
+		},
+		{
+			name: "downstream empty object is unchanged",
+			in: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"empty": map[string]any{},
+				},
+			},
+			want: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"empty": map[string]any{},
+				},
+			},
+		},
+		{
+			name: "root union is unchanged",
+			in: map[string]any{
+				"anyOf": []any{map[string]any{"type": "object"}, map[string]any{"type": "string"}},
+			},
+			want: map[string]any{
+				"anyOf": []any{map[string]any{"type": "object"}, map[string]any{"type": "string"}},
+			},
+		},
+		{
+			name: "nested union is unchanged",
+			in: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"choice": map[string]any{
+						"oneOf": []any{map[string]any{"type": "string"}},
+					},
+				},
+			},
+			want: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"choice": map[string]any{
+						"oneOf": []any{map[string]any{"type": "string"}},
+					},
+				},
+			},
+		},
+		{
+			name: "unknown keywords are unchanged",
+			in: map[string]any{
+				"type":                 "object",
+				"$ref":                 "#/$defs/Root",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"mode": map[string]any{
+						"type":    "string",
+						"enum":    []any{"a", "b"},
+						"default": "a",
+					},
+				},
+				"patternProperties": map[string]any{
+					"^x": map[string]any{},
+				},
+				"$defs": map[string]any{
+					"Root": map[string]any{"type": "object"},
+				},
+			},
+			want: map[string]any{
+				"type":                 "object",
+				"$ref":                 "#/$defs/Root",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"mode": map[string]any{
+						"type":    "string",
+						"enum":    []any{"a", "b"},
+						"default": "a",
+					},
+				},
+				"patternProperties": map[string]any{
+					"^x": map[string]any{},
+				},
+				"$defs": map[string]any{
+					"Root": map[string]any{"type": "object"},
+				},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tool := &mcp.Tool{Name: "t", InputSchema: tc.in}
+			SanitizeToolSchema(tool)
+			got, _ := tool.InputSchema.(map[string]any)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %#v\nwant %#v", got, tc.want)
+			}
+		})
 	}
 }
 

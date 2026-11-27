@@ -901,28 +901,14 @@ func cleanupGitCheckpoint(target string) {
 // ---------------------------------------------------------------------------
 
 // mcpGoBinary returns the Go binary to use for pipeline build validation.
-// Priority: MCP_GO_BIN_PATH env var → common SDK paths → "go" fallback.
+// Priority: MCP_GO_BIN_PATH, unchecked; then the newest executable
+// <home>/sdk/go*/bin/go (parsed MAJOR.MINOR[.PATCH], newest first; unparsed
+// names after those, descending text); then ~/.local/go, ~/go, and
+// /usr/local/go, in that order; then "go" on PATH. A non-executable candidate
+// is skipped. Windows still falls through to PATH (0005 amendment (a)).
 func mcpGoBinary() string {
-	if v := os.Getenv("MCP_GO_BIN_PATH"); v != "" {
-		return v
-	}
 	home := homeDirOrDot()
-	candidates := []string{
-		filepath.Join(home, "sdk", "go1.26.5", "bin", "go"),
-		filepath.Join(home, "sdk", "go1.26.1", "bin", "go"),
-		filepath.Join(home, ".local", "go", "bin", "go"),
-		filepath.Join(home, "go", "bin", "go"),
-		"/usr/local/go/bin/go",
-	}
-	if matches, err := filepath.Glob(filepath.Join(home, "sdk", "go*", "bin", "go")); err == nil {
-		candidates = append(matches, candidates...)
-	}
-	for _, c := range candidates {
-		if info, err := os.Stat(c); err == nil && info.Mode().IsRegular() && info.Mode()&0o111 != 0 {
-			return c
-		}
-	}
-	return "go"
+	return resolveGoBinary(os.Getenv("MCP_GO_BIN_PATH"), home, fixedGoFallbacks(home))
 }
 
 func buildPipelineResult(results []stepResult, status string, warnings []string) *mcp.CallToolResult {

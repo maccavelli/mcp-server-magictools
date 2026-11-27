@@ -8,59 +8,104 @@ import (
 )
 
 // SanitizeToolSchema ensures that a tool's inputSchema is valid and never nil.
-// If InputSchema is nil or empty, it defaults to {"type": "object", "properties": {}}.
+// A nil schema becomes {"type": "object", "properties": {}}.
+//
+// The walk is 0005's D3.1 table (docs/decisions/0005-MADR-make-execute-pipeline-schema-and-handler-agree.md).
+// A missing root type becomes object, because MCP requires an object root. A missing root
+// properties map becomes {}. An untyped property is left untyped: adding type: object was the
+// retyping Decided 6 removed, and it is what made a description-only node look like an object.
+// A null property becomes {}, the one empty this function may invent, and only from an invalid
+// input. An object-typed property with no properties keeps properties: {}; D3.2's probe was not
+// run, so the default is to keep them. A union (anyOf, oneOf, allOf) at the root or nested is
+// not written, byte for byte (D3.4). items: {}, a downstream {}, and keywords this function does
+// not know ($ref, $defs, enum, default, additionalProperties, patternProperties) are not written.
 func SanitizeToolSchema(tool *mcp.Tool) *mcp.Tool {
 	if tool == nil {
 		return nil
 	}
 
 	if tool.InputSchema == nil {
-		tool.InputSchema = map[string]any{
-			schemaKeyType:       schemaTypeObject,
-			schemaKeyProperties: map[string]any{},
-		}
+		tool.InputSchema = defaultObjectSchema()
 		return tool
 	}
 
-	// 🛡️ BASTION SAFETY: If it's a map, recursively sanitize it.
 	switch v := tool.InputSchema.(type) {
 	case map[string]any:
-		tool.InputSchema = sanitizeMap(v)
+		tool.InputSchema = sanitizeRoot(v)
 	case json.RawMessage:
 		var m map[string]any
 		if err := json.Unmarshal(v, &m); err == nil {
-			tool.InputSchema = sanitizeMap(m)
+			tool.InputSchema = sanitizeRoot(m)
 		}
 	}
 
 	return tool
 }
 
-func sanitizeMap(m map[string]any) map[string]any {
-	if m == nil {
-		return map[string]any{
-			schemaKeyType:       schemaTypeObject,
-			schemaKeyProperties: map[string]any{},
-		}
+func defaultObjectSchema() map[string]any {
+	return map[string]any{
+		schemaKeyType:       schemaTypeObject,
+		schemaKeyProperties: map[string]any{},
 	}
+}
 
-	// If it doesn't have a type, it's potentially an invalid schema part.
+func isUnionSchema(m map[string]any) bool {
+	_, anyOf := m["anyOf"]
+	_, oneOf := m["oneOf"]
+	_, allOf := m["allOf"]
+	return anyOf || oneOf || allOf
+}
+
+// sanitizeRoot applies the root rows. A union root is returned as the same map, with no writes.
+func sanitizeRoot(m map[string]any) map[string]any {
+	if m == nil {
+		return defaultObjectSchema()
+	}
+	if isUnionSchema(m) {
+		return m
+	}
 	if _, ok := m[schemaKeyType]; !ok {
 		m[schemaKeyType] = schemaTypeObject
 	}
-
-	if props, ok := m[schemaKeyProperties].(map[string]any); ok {
-		for k, v := range props {
-			if v == nil {
-				props[k] = map[string]any{schemaKeyType: schemaTypeObject}
-			} else if pm, ok := v.(map[string]any); ok {
-				props[k] = sanitizeMap(pm)
-			}
-		}
-	} else if _, ok := m[schemaKeyProperties]; !ok && m[schemaKeyType] == schemaTypeObject {
+	props, hasProps := m[schemaKeyProperties]
+	if !hasProps {
 		m[schemaKeyProperties] = map[string]any{}
+		return m
 	}
+	if pm, ok := props.(map[string]any); ok {
+		sanitizeProperties(pm)
+	}
+	return m
+}
 
+func sanitizeProperties(props map[string]any) {
+	for k, v := range props {
+		props[k] = sanitizeProperty(v)
+	}
+}
+
+// sanitizeProperty applies the property rows. It does not add type to an untyped node, and it
+// does not walk items, additionalProperties, patternProperties, or $defs.
+func sanitizeProperty(v any) any {
+	if v == nil {
+		return map[string]any{}
+	}
+	m, ok := v.(map[string]any)
+	if !ok || len(m) == 0 || isUnionSchema(m) {
+		return v
+	}
+	typ, hasType := m[schemaKeyType]
+	if !hasType || typ != schemaTypeObject {
+		return m
+	}
+	props, hasProps := m[schemaKeyProperties]
+	if !hasProps {
+		m[schemaKeyProperties] = map[string]any{}
+		return m
+	}
+	if pm, ok := props.(map[string]any); ok {
+		sanitizeProperties(pm)
+	}
 	return m
 }
 

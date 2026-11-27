@@ -1,6 +1,6 @@
 ---
 status: in-progress
-date: 2026-11-17
+date: 2026-11-26
 associated-madr: "0005-MADR-make-execute-pipeline-schema-and-handler-agree.md"
 ---
 
@@ -20,6 +20,83 @@ each repeat their properties (S2). The sanitiser stops retyping untyped properti
 D3.1; stored proxied schemas are refreshed; nested `properties: {}` are kept or removed on the evidence step's
 outcome.
 Nothing reaches the owner's running server except by the owner's own build, install and restart (P9).
+
+That goal is the goal as approved on 2026-11-17. It is not the remaining work. The current state and the forward path are the next section. Do not execute P3, P4, P5 or P6 of this plan: those phases landed under [0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md). Do not restore the S2 union: [0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md) superseded D1 for the served schema.
+
+## Current state and forward path (2026-11-26, `34bf269`)
+
+Read against the tree. Not a new decision. The MADR's amendment (b) holds the same facts.
+
+**P3, the session store, is done.** It was built by 0013, not by an execution record of this plan. At `34bf269`:
+
+| This phase required | Where it is |
+| :--- | :--- |
+| key prefix `pipeline-session:` | `internal/db/pipeline_session.go:28` |
+| values compressed as `SaveRawResource` does | `util.Compress` at `:116` |
+| Badger TTL of the 24-hour lifetime plus a one-hour grace | `:30-34`, `:125` |
+| `expires_at` in the value | `:77`, `:109-111` |
+| one transaction that reads the state and writes the next | `UpdateWithRetryCtx` at `:121` and `:224`. This plan said `UpdateWithRetry`. Both exist (`internal/db/badger.go:813`, `:856`). 0013 adopted `UpdateWithRetryCtx`. Not a gap. |
+| cap of 50 `PLANNED`, oldest first | `PipelineSessionCap` at `:25`; `evictOverCap` at `:132-171` |
+| instance nonce recorded at `RUNNING` and compared on read | `ClaimRunning` at `:232-233`; `GetForInstance` at `:213-214` |
+| no exported way to write a state without its transition rule | production methods follow the transitions. `OverwriteForTest` exists only under `//go:build magictoolstestseam` and only for a `PLANNED` record (`internal/db/pipeline_session_testseam.go:1-22`). 0013 recorded that seam. |
+
+P4's argument gate, P5's continue and reject, and the continuation half of P6 are also in the tree, under 0013. The served schema is flat: `internal/handler/inventory.go` `execute_pipeline` entry (`:399-445`) has seven properties, `additionalProperties: false`, `minProperties: 1`, and no union keyword anywhere in that file. `docs/guides/mcp-tools.md:73-84` states the two-stage contract. The dry-run path appends 0005's disclosure (`internal/handler/execute_pipeline_session.go:88-107`). It still also emits the old line "call execute_pipeline again with dry_run=false" (`internal/handler/execute_pipeline.go:144`), because `freshPipelineDryRun` calls `buildDryRunResult` and then appends the disclosure. That leftover sentence is not a P3 defect and is not part of the remaining phase. Noted, not scheduled.
+
+**What this plan still owned at the re-grounding:**
+
+1. **D3, the sanitiser (P1's evidence rule, then P7).** At the re-grounding, `SanitizeToolSchema` still retyped. That is no longer true after the P7 execution below. P1's owner probe still has no recorded result, so the D3.2 default stands: keep nested `properties: {}`.
+2. **Amendment (a), the Go-binary lookup.** At the re-grounding it had not landed. It landed in the execution below. The stale names are gone. The glob is sorted newest-first.
+
+**Forward path, as written at the re-grounding.** Do not re-open P3, P4, P5 or P6, and do not restore S2. P9 as written must not be run: its "two branches" check is the superseded schema. A live install stays the owner's.
+
+### P7 execution — 2026-11-26
+
+The owner approved this phase ("approved to proceed"). Tests first, seen red, then the change.
+
+Red: `TestSanitizeToolSchema_SetsDefaultType`, `TestSanitizeToolSchema_Raw`, five rows of `TestSanitizeToolSchema_D31Table`, and `TestSyncSchemaRefresh_RetypingChangeDoesNotSkip`. The failures were the retyping: untyped properties gained `type: object`, a null property became `{type: object}`, a union gained a root type. First failure line: `schema_util_test.go:50: untyped property gained type object; want it left unchanged`.
+
+Change: `internal/util/schema_util.go` implements the D3.1 table. Nested `properties: {}` are kept. `internal/client/sync_schema_refresh_test.go` holds D3.3's hash claim: an old-form stored hash does not skip, and the saved schema is the new form; an unchanged tool still skips. Deviation: `internal/handler/handlers.go`'s `addTool` comment was updated so it no longer describes the old retyping. No guide had a sanitiser note.
+
+Green, push gate, 2026-11-26, after the owner required the make targets and the CI job before anything was called ready to push:
+
+| Gate | Where | Result |
+| :--- | :--- | :--- |
+| `gofmt -l cmd internal` | session host | empty, exit 0 |
+| `go mod tidy` diff | session host | `go.mod` and `go.sum` unchanged; files restored |
+| `make check-records` | session host | exit 0 |
+| `make markdownlint` | session host | 0 issues |
+| `make test` (`go test -v -tags magictoolstestseam ./...`) | `<linux-host>`, linux/amd64 | exit 0, 21 packages `ok`, 0 `FAIL`, 60s |
+| `make vet`, then `CGO_ENABLED=0 go test -count=1 -timeout 20m ./...`, then `make lint` with golangci-lint v2.15.0 | `Ubuntu-24.04` via the Windows laptop | exit 0, 21 packages `ok`, lint `0 issues.` |
+| `go test -race -count=1 -timeout 20m` of `internal/handler`, `internal/db`, `internal/util`, `internal/client` | session host, darwin/arm64, `--race` | exit 0 |
+| `go vet`, `go build`, `CGO_ENABLED=0 go test -count=1 -timeout 20m ./...` | `<windows-host>`, windows/amd64 | exit 0 |
+| the same three | session host, darwin/arm64 | exit 0 |
+| `sh -n`, `shellcheck`, `scripts/install_test.sh` | session host | 34 passed, 0 failed |
+| `scripts/install.ps1 -WhatIf` | windows/amd64 | exit 0; place-binary only; path contains `Programs\magictools` |
+
+That table is the gate of the sanitiser tree, before amendment (a). It does not cover the lookup.
+
+### Amendment (a) execution — 2026-11-26
+
+The owner said to finish the plan. P9 was not run: the plan forbids an agent from building, installing, or restarting the owner's server.
+
+Red: `go test -run TestResolveGoBinary ./internal/handler` failed to compile. First line: `go_binary_test.go:25:11: undefined: resolveGoBinary`. The seam did not exist, so the old function could not be called with a temporary home.
+
+Change: `mcpGoBinary` keeps its name and signature and calls `resolveGoBinary`. `fixedGoFallbacks` is `~/.local/go`, `~/go`, `/usr/local/go`. The SDK glob is sorted by the MADR's N-c rule. `docs/guides/mcp-tools.md` says that without `MCP_GO_BIN_PATH` the newest `go*` directory under the home directory's `sdk` folder is used first. The two no-assertion calls in `execute_pipeline_extra_test.go` were left as they are.
+
+Green, package: `go test -run 'TestResolveGoBinary|TestFixedGoFallbacksOmitStaleNames' ./internal/handler` exit 0.
+
+Plants, each in a scratch copy, then the scratch deleted. The working tree was not the plant.
+
+| Plant | Test that failed | First failure line |
+| :--- | :--- | :--- |
+| glob taken in ascending path order | `TestResolveGoBinary/newest_wins_when_text_order_is_oldest_first` | `go1.26.11 with go1.27.4: got .../go1.26.11/bin/go, want .../go1.27.4/bin/go` |
+| `go1.27rc1` parsed as `1.27.0` | `TestResolveGoBinary/release_candidate_does_not_outrank_an_older_release` | `got .../go1.27rc1/bin/go, want .../go1.26.11/bin/go` |
+| untyped property given `type: object` | `TestSanitizeToolSchema_D31Table/untyped_property_stays_untyped` | `got ... "type":"object" ... want` the description-only node |
+| root union given `type` and `properties` | `TestSanitizeToolSchema_D31Table/root_union_is_unchanged` | `got` a root with `type` and `properties`, `want` the union alone |
+
+The continuation plants were already recorded by [0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](0013-PLAN-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md). They were not repeated. The independent review was not dispatched: the author of the change is not that reviewer. P9 was not run.
+
+Status stays `in-progress`. The agent's code phases are done. The owner's live install, restart, and sync are not, and this record does not pretend they are.
 
 ## Approval
 
@@ -183,6 +260,8 @@ suite unchanged; no source change.
 
 ### P3 — the session store
 
+**Not the next step. Implemented by 0013, not by an execution of this plan.** Assessed at `34bf269` on 2026-11-26: the store in `internal/db/pipeline_session.go` matches this phase's contract. Do not build it again. The original step is kept below so the approval still has a text. The comparison is in the current-state section.
+
 Strongest tier, high. Files: `internal/db/pipeline_session.go` (and its constants).
 
 A store type with its own key prefix (`pipeline-session:`), values compressed as `SaveRawResource` does, a `Badger`
@@ -196,6 +275,8 @@ Gate: P2's store tests green with `-race -timeout 10m` for the `internal/db` pac
 
 ### P4 — the argument gate and the fresh-mode fixes
 
+**Not the next step. Implemented by 0013** (`internal/handler/execute_pipeline_gate.go`, `handleExecutePipeline` at `internal/handler/execute_pipeline.go:35-62`). The original step is kept below. The Go-binary lookup in amendment (a), which this plan later placed beside P4, did **not** land. That lookup is still open. See the current-state section.
+
 Mainstream, medium. Files: `execute_pipeline.go`.
 
 Strict decode of the arguments (unknown key, wrong type: refused with `bad_arguments`); the decision order of the
@@ -207,6 +288,8 @@ Gate: P2's contract-table handler assertions, the `reject` zero-call tests and t
 existing handler test (the all-three dry run) unchanged and green. Commit and push (K8).
 
 ### P5 — dry-run store, continue, reject
+
+**Not the next step. Implemented by 0013** in `internal/handler/execute_pipeline_session.go`. The original step is kept below.
 
 Strongest tier, high. Files: a new `internal/handler/execute_pipeline_session.go`, `execute_pipeline.go`.
 
@@ -224,6 +307,8 @@ Gate: P2's continuation, claim-race, expiry, interrupted-run and reject zero-cal
 `internal/handler` package green with `-race -timeout 20m`. Commit and push (K8).
 
 ### P6 — the schema, the descriptions, the prompt, the guide
+
+**Not the next step, and not this plan's S2.** 0013 served a flat schema and superseded D1. `internal/handler/inventory.go` has no `anyOf`, `oneOf` or `allOf` at `34bf269`. Restoring two typed branches would contradict 0013. The original step is kept below as the text that was approved, not as work to do.
 
 Mainstream, medium. Files: `inventory.go`, `prompts.go`, `docs/guides/mcp-tools.md`, the dry-run result text.
 
@@ -310,7 +395,7 @@ The owner, when the owner chooses:
    call the `sync_servers` tool from the client. Both need the downstream servers to start, which is why it is the
    owner's step.
 5. **Check from Claude Code**, on a scratch directory holding a small Go module, not a real project:
-   * `/mcp` lists `execute_pipeline` and its schema has two branches.
+    * `/mcp` lists `execute_pipeline` and its schema has two branches. **Stale as of 2026-11-26.** The served schema is flat (0013). Do not treat a missing union as a failure of this plan.
    * `execute_pipeline` with `target`, `intent`, `dry_run: true`: a plan, an issued `session_id`, an expiry, and the
      notice that mutation is decided at run time.
    * the same `session_id` with `reject: true`: status `REJECTED`, no steps; repeating it returns the same; continuing

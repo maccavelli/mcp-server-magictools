@@ -87,7 +87,9 @@ The `pipeline-start` MCP prompt instructs the client to preserve structured
 artifact paths and obtain explicit user confirmation of intent, target, and
 blast radius before continuing. Pipeline implementation is Go-oriented and can
 invoke the Go toolchain for build validation. Set `MCP_GO_BIN_PATH` where the
-managed process cannot discover `go` on `PATH`.
+managed process cannot discover `go` on `PATH`. Without that variable, the
+newest `go*` directory under the home directory's `sdk` folder is used before
+the other fixed locations and `PATH`.
 
 ## Raw output resources
 

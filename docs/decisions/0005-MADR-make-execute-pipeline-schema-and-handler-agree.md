@@ -1,6 +1,6 @@
 ---
 status: accepted
-date: 2026-11-17
+date: 2026-11-26
 decision-makers: repository owner
 consulted: "the owner's report of 2026-11-16 and rulings of 2026-11-17, relayed by the cross-repository coordinator;
 gobble-cli's 0060-MADR-normalise-root-level-unions-in-mcp-tool-schemas.md (draft, uncommitted); magic-cli-remote's
@@ -23,6 +23,8 @@ such schemas; its Q5 asks whether this server should be fixed as well. This reco
 all measured at commit `368ac6a` of `main`: the schema's untyped branches (item 1), the handler's refusal of what the
 schema and the documentation advertise (item 2), and the empty objects this server sends (item 3). Its design
 sections (D2) specify the continuation feature the owner asked for.
+
+The body below is the decision of 2026-11-17, measured at `368ac6a`. It is not a description of HEAD. What the tree does at `34bf269` (2026-11-26) is amendment (b), at the end of this file. Read that before treating any "today" claim in the body as current.
 
 ### Decided (the owner, 2026-11-17, relayed by the coordinator; each label quoted only as a label)
 
@@ -862,3 +864,40 @@ On the owner's Mac one SDK is installed, so nothing is wrong there today; the de
   * **(c)** Remove the SDK glob on every platform (N-d). Cost: no automatic side-by-side lookup anywhere.
 
 The plan proceeds with (a) unless the owner answers otherwise.
+
+## Amendment 2026-11-26 (b): re-grounding at `34bf269`
+
+This amendment records what the tree does now. It does not change Decided 1 to 15. It does not approve execution. The body's evidence index, except where this amendment says a citation still resolves, describes `368ac6a`.
+
+**What 0013 took.** [0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md](0013-MADR-flatten-execute-pipelines-schema-and-build-the-continuation-it-advertises.md) adopted D2 and superseded D1 (S2) for the served schema. Its plan is `implemented`. At `34bf269` the continuation is in the handler, not a proposal:
+
+* The argument gate decides the mode before an executor is in reach (`internal/handler/execute_pipeline.go:35-62`).
+* A dry run stores a `PLANNED` session and appends the D2 disclosure (`internal/handler/execute_pipeline_session.go:36-107`).
+* The served schema is flat. `internal/handler/inventory.go` contains no `anyOf`, `oneOf` or `allOf`. The `execute_pipeline` entry (`:399-445`) has seven properties, `additionalProperties: false` and `minProperties: 1`.
+* `docs/guides/mcp-tools.md:73-84` states that contract.
+
+D1's S2 form is therefore not the schema to build. Restoring the union would contradict 0013. The decision text above stays as the ruling of 2026-11-17.
+
+**P3, assessed.** The session store this record's plan named is `internal/db/pipeline_session.go`. It matches the decided store: prefix `pipeline-session:` (`:28`), compressed values (`:116`), TTL of 24 hours plus one hour (`:30-34`, `:125`), `expires_at` in the value (`:77`), cap 50 with oldest-first eviction (`:25`, `:132-171`), nonce recorded at `RUNNING` and compared on read (`:213-214`, `:232-233`). Transitions use `UpdateWithRetryCtx` (`:121`, `:224`). This record said `UpdateWithRetry`. Both functions exist (`internal/db/badger.go:813`, `:856`). 0013 adopted the context form. That is not a gap. `OverwriteForTest` is compiled only with `magictoolstestseam` and refuses any status other than `PLANNED` (`internal/db/pipeline_session_testseam.go:1-22`). No production method writes a state outside its transition.
+
+**What is still open, and still this record's.**
+
+* **D3.1 had not landed at the re-grounding.** That sentence was true at the start of 2026-11-26. It is not true after the P7 execution the same day, recorded below. The old `sanitizeMap` retyping is gone. `TestSanitizeToolSchema_D31Table` holds the table. A `null` property's output is `{}`.
+* **D3.2 is unchanged.** No owner probe result is recorded. Nested `properties: {}` stay until that evidence says removal is safe. The retyping fix does not wait.
+* **D3.3 is unchanged.** Stored proxied schemas were sanitised before they were stored. A sync is still what refreshes them. Not verified against a live store in this amendment.
+* **D3.4 is unchanged.** Pass a downstream union through. Nothing in this amendment revisits that.
+* **Amendment (a) had not landed at the re-grounding.** It landed the same day, recorded in the PLAN's amendment (a) execution. `mcpGoBinary` calls `resolveGoBinary`. The stale names are not in the fallbacks. E32's old line numbers still do not describe HEAD; the function is the short call at the end of `internal/handler/execute_pipeline.go`, and the rule is in `internal/handler/go_binary.go`.
+
+**A leftover, not a new decision.** `buildDryRunResult` still tells the caller to "call execute_pipeline again with dry_run=false" (`internal/handler/execute_pipeline.go:144`). The dry-run path calls that function and then appends the decided disclosure. The stale sentence is still in the result. It is not scheduled here.
+
+**Forward path, as written at the re-grounding.** Do not rebuild the store, the gate, the continuation, or the S2 schema. Amendment (a) is separate and still open. P9's check for two schema branches is void. A live install remains the owner's.
+
+### P7 execution — 2026-11-26
+
+The owner approved execution the same day ("approved to proceed"). Tests were written against the unchanged tree and seen red, then the sanitiser was changed.
+
+Red, before the change, `go test` of the named tests: `TestSanitizeToolSchema_SetsDefaultType` failed because an untyped property gained `type: object` and `properties: {}`; `TestSanitizeToolSchema_Raw` failed because a null property became `{type: object}`; five D3.1 rows failed the same way (untyped, null, empty object, root union, nested union); `TestSyncSchemaRefresh_RetypingChangeDoesNotSkip` failed because the saved schema still retyped. The rows the old function already matched (root type, root properties, object-typed property missing properties, `items: {}`, unknown keywords) passed.
+
+The change: `internal/util/schema_util.go` walks the D3.1 table. A union is not written. An untyped property is not given a type. A null property becomes `{}`. Nested `properties: {}` are kept, because the D3.2 probe was not run. `internal/handler/handlers.go`'s `addTool` comment no longer says every nested property is re-assigned. That comment was outside the plan's file list; leaving it would have described the old retyping as current. No guide note existed to update.
+
+Green, after the change, and again after the push gate of 2026-11-26: `make test` on `<linux-host>` (21 packages `ok`); `make vet`, `CGO_ENABLED=0 go test ./...`, and `make lint` v2.15.0 on `Ubuntu-24.04` (lint `0 issues.`); race of the four packages on darwin; native `go vet`, `go build`, and `CGO_ENABLED=0 go test ./...` on windows/amd64 and darwin/arm64; `gofmt`, tidy, `make check-records`, `make markdownlint`, and both installers. All exit 0. Not run: P8's plants, P9, and amendment (a). Not committed. Not pushed.

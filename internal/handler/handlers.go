@@ -218,8 +218,9 @@ func (h *OrchestratorHandler) Register(s *mcp.Server) {
 // header is copied under the read lock, the copy is iterated, and the lock is released before the loop and before
 // s.AddTool, so no lock is held across the SDK call.
 //
-// It also WRITES. util.SanitizeToolSchema edits the inventory element's schema map in place (it adds a missing type
-// or properties, and re-assigns every nested property), and the SDK is handed that same map. That is safe only
+// It also WRITES. util.SanitizeToolSchema edits the inventory element's schema map in place (it adds a missing
+// root type or root properties, replaces a null property with {}, and may add properties: {} on an object-typed
+// property). It does not retype an untyped property. The SDK is handed that same map. That is safe only
 // because registration completes before the server serves anything: every reader of those maps runs only while a
 // client request is being handled. That includes the SDK itself: Server.AddTool keeps the tool, and with it the
 // same inventory map (its own remarshal only checks a copy), and the SDK's tools/list marshals that map on every

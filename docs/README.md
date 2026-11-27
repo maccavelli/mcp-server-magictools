@@ -26,7 +26,7 @@ This tree holds three kinds of document:
 | 0005 | MADR | [0005-MADR-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-MADR-make-execute-pipeline-schema-and-handler-agree.md) | accepted |
 | 0005 | PLAN | [0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-PLAN-make-execute-pipeline-schema-and-handler-agree.md) | in-progress |
 | 0006 | MADR | [0006-MADR-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md](decisions/0006-MADR-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md) | accepted |
-| 0006 | PLAN | [0006-PLAN-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md](decisions/0006-PLAN-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md) | in-progress |
+| 0006 | PLAN | [0006-PLAN-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md](decisions/0006-PLAN-move-go-pins-to-1-26-11-and-1-27-4-and-bump-klauspost-compress.md) | implemented |
 | 0007 | MADR | [0007-MADR-install-the-fleet-agent-workspace.md](decisions/0007-MADR-install-the-fleet-agent-workspace.md) | accepted |
 | 0007 | PLAN | [0007-PLAN-install-the-fleet-agent-workspace.md](decisions/0007-PLAN-install-the-fleet-agent-workspace.md) | implemented |
 | 0008 | MADR | [0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md](decisions/0008-MADR-redesign-the-list-tools-middleware-under-the-complexity-limit.md) | accepted |
@@ -44,13 +44,16 @@ This tree holds three kinds of document:
 | 0014 | REPORT | [0014-REPORT-mcp-tool-schema-and-description-adherence.md](reports/0014-REPORT-mcp-tool-schema-and-description-adherence.md) | complete |
 | 0015 | MADR | [0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md](decisions/0015-MADR-carry-the-mcp-standards-title-annotations-and-constraint-keywords-on-every-own-tool.md) | accepted |
 | 0015 | PLAN | [0015-PLAN-annotate-own-tools-with-behaviour-hints.md](decisions/0015-PLAN-annotate-own-tools-with-behaviour-hints.md) | implemented |
-| 0015 | PLAN | [0015-PLAN-express-handler-constraints-as-schema-keywords.md](decisions/0015-PLAN-express-handler-constraints-as-schema-keywords.md) | proposed |
+| 0015 | PLAN | [0015-PLAN-declare-json-schema-2020-12-on-every-own-tool.md](decisions/0015-PLAN-declare-json-schema-2020-12-on-every-own-tool.md) | implemented |
+| 0015 | PLAN | [0015-PLAN-express-handler-constraints-as-schema-keywords.md](decisions/0015-PLAN-express-handler-constraints-as-schema-keywords.md) | implemented |
+| 0015 | PLAN | [0015-PLAN-give-every-own-tool-a-human-readable-title.md](decisions/0015-PLAN-give-every-own-tool-a-human-readable-title.md) | implemented |
 
 ## I want to…
 
 | I want to… | Start here |
 | :--- | :--- |
 | understand how this fits together | [architecture.md](architecture.md) |
+| know what is left of the pipeline contract | [0005-MADR-make-execute-pipeline-schema-and-handler-agree.md](decisions/0005-MADR-make-execute-pipeline-schema-and-handler-agree.md) — continuation, session store, and the sanitiser table have landed; the Go-binary lookup has not |
 | know the rules agents follow in this repository | [CLAUDE.md](../CLAUDE.md) |
 | know why the repository has the files and gates it has | [0007-MADR-install-the-fleet-agent-workspace.md](decisions/0007-MADR-install-the-fleet-agent-workspace.md) |
 | install or upgrade the binary | [Platform installation](guides/platform-installation.md) |
