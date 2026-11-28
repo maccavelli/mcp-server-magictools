@@ -49,6 +49,8 @@ This tree holds three kinds of document:
 | 0015 | PLAN | [0015-PLAN-give-every-own-tool-a-human-readable-title.md](decisions/0015-PLAN-give-every-own-tool-a-human-readable-title.md) | implemented |
 | 0016 | MADR | [0016-MADR-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md](decisions/0016-MADR-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md) | accepted |
 | 0016 | PLAN | [0016-PLAN-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md](decisions/0016-PLAN-stop-the-pid-file-cleanup-signalling-a-live-store-holder.md) | implemented |
+| 0017 | MADR | [0017-MADR-stop-zero-value-injection-forging-missing-required-arguments.md](decisions/0017-MADR-stop-zero-value-injection-forging-missing-required-arguments.md) | accepted |
+| 0017 | PLAN | [0017-PLAN-stop-zero-value-injection-forging-missing-required-arguments.md](decisions/0017-PLAN-stop-zero-value-injection-forging-missing-required-arguments.md) | implemented |
 
 ## I want to…
 

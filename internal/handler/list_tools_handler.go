@@ -206,7 +206,8 @@ func (h *OrchestratorHandler) CallToolMiddleware(next mcp.MethodHandler) mcp.Met
 			}
 
 			if h.Config.ValidateProxyCalls && toolRecord != nil {
-				ps.CoerceAndStrip(toolRecord, args)
+				// 0017: ValidateArguments coerces internally; the duplicate
+				// CoerceAndStrip call that used to sit here is removed.
 				if valErr := ps.ValidateArguments(ctx, urn, toolRecord, args); valErr != nil {
 					slog.Warn("orchestrator: namespaced call pre-flight validation failed", keyURN, urn, keyError, valErr)
 					return &mcp.CallToolResult{

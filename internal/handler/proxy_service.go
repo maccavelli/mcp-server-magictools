@@ -39,14 +39,15 @@ func (ps *ProxyService) hydrateRecord(record *db.ToolRecord) {
 	ps.Handler.Store.HydrateToolSchema(record)
 }
 
-// AutoCoerceArguments rapidly injects missing properties with zero-values or defaults natively
-// utilizing the pre-computed ZeroValues profile directly from the cached ToolRecord.
-// This executes in O(1) latency cleanly offloading formatting burdens from the LLM agent.
+// AutoCoerceArguments applies explicit schema defaults to absent optional
+// fields and coerces the types of fields the agent did send. Required fields
+// are never fabricated (0017); their presence is checked in ValidateArguments
+// before this runs.
 func (ps *ProxyService) AutoCoerceArguments(record *db.ToolRecord, args map[string]any) {
 	if record == nil {
 		return
 	}
-	ps.injectZeroValues(record, args)
+	ps.injectSchemaDefaults(record, args)
 	ps.coerceSchemaTypes(record, args)
 }
 
@@ -65,6 +66,15 @@ func (ps *ProxyService) ValidateArguments(ctx context.Context, urn string, recor
 	hash := record.SchemaHash
 	if hash == "" {
 		return nil
+	}
+
+	// 0017: required-field presence is checked on the incoming payload, before
+	// any coercion mutates it. Injection used to fabricate every missing
+	// required key here, so the compiled validator could never reject one and
+	// the Tier-2 correction below was unreachable for that case.
+	if missing := missingRequiredKeys(record.InputSchema, args); len(missing) > 0 {
+		return ps.formatStructuredCorrectionError(urn, record, args,
+			fmt.Errorf("missing required fields: %s", strings.Join(missing, ", ")))
 	}
 
 	ps.CoerceAndStrip(record, args)
@@ -196,6 +206,30 @@ func (ps *ProxyService) CoerceAndStrip(record *db.ToolRecord, args map[string]an
 	if record.InputSchema != nil {
 		stripExtraProperties(record.InputSchema, args)
 	}
+}
+
+// missingRequiredKeys returns the schema's top-level required keys absent
+// from args, in schema order. A nil args map is treated as empty. Nested
+// required fields are left to the compiled validator (0017 S7).
+func missingRequiredKeys(schema map[string]any, args map[string]any) []string {
+	if schema == nil {
+		return nil
+	}
+	req, ok := schema[keyRequired].([]any)
+	if !ok {
+		return nil
+	}
+	var missing []string
+	for _, r := range req {
+		key, ok := r.(string)
+		if !ok {
+			continue
+		}
+		if _, present := args[key]; !present {
+			missing = append(missing, key)
+		}
+	}
+	return missing
 }
 
 // formatStructuredCorrectionError returns a Tier 2 structured correction template

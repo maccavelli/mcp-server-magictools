@@ -10,13 +10,39 @@ import (
 	"github.com/maccavelli/mcp-server-magictools/internal/db"
 )
 
-func (ps *ProxyService) injectZeroValues(record *db.ToolRecord, args map[string]any) {
-	if record.ZeroValues == nil {
+// injectSchemaDefaults inserts an absent optional key's explicit schema
+// `default` (0017 S4). Required keys are never injected (S1, S5); keys
+// without a schema default are never injected, whatever ZeroValues holds
+// (S6). ZeroValues is no longer an injection source.
+func (ps *ProxyService) injectSchemaDefaults(record *db.ToolRecord, args map[string]any) {
+	if record.InputSchema == nil {
 		return
 	}
-	for key, zeroVal := range record.ZeroValues {
-		if _, exists := args[key]; !exists {
-			args[key] = zeroVal
+	props, ok := record.InputSchema[keyProperties].(map[string]any)
+	if !ok {
+		return
+	}
+	required := make(map[string]bool)
+	if req, ok := record.InputSchema[keyRequired].([]any); ok {
+		for _, r := range req {
+			if key, ok := r.(string); ok {
+				required[key] = true
+			}
+		}
+	}
+	for key, propRaw := range props {
+		if required[key] {
+			continue
+		}
+		if _, exists := args[key]; exists {
+			continue
+		}
+		propDef, ok := propRaw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if def, hasDefault := propDef["default"]; hasDefault {
+			args[key] = def
 		}
 	}
 }

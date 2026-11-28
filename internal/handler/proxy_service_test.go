@@ -14,11 +14,21 @@ import (
 func TestAutoCoerceArguments(t *testing.T) {
 	ps := NewProxyService(nil)
 
+	// 0017: injection is schema-default-driven. Optional fields with an
+	// explicit default are filled; required fields and fields without a
+	// default are never fabricated, whatever ZeroValues holds.
 	record := &db.ToolRecord{
-		ZeroValues: map[string]any{
-			"lines":     50,
-			"recursive": true,
+		InputSchema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"path":      map[string]any{"type": "string"},
+				"lines":     map[string]any{"type": "integer", "default": 50},
+				"recursive": map[string]any{"type": "boolean", "default": true},
+				"nodefault": map[string]any{"type": "string"},
+			},
+			"required": []any{"path"},
 		},
+		ZeroValues: map[string]any{"path": "", "nodefault": "should-not-appear"},
 	}
 
 	args := map[string]any{
@@ -30,8 +40,11 @@ func TestAutoCoerceArguments(t *testing.T) {
 	if val, ok := args["lines"].(int); !ok || val != 50 {
 		t.Errorf("expected lines to be 50, got %v", args["lines"])
 	}
-	if val, ok := args["recursive"].(bool); !ok || val != true {
+	if val, ok := args["recursive"].(bool); !ok || !val {
 		t.Errorf("expected recursive to be true, got %v", args["recursive"])
+	}
+	if _, ok := args["nodefault"]; ok {
+		t.Errorf("field without a schema default must not be injected, got %v", args)
 	}
 }
 
